@@ -136,23 +136,13 @@ class PPTAgent:
         self, spec: dict, style: str, slide_index: int, context_slides: list[dict], language: str = "zh"
     ) -> SlideResult:
         """Stage 2: Generate one slide from spec with context. Auto-retries on low quality."""
-        html = self.generator.generate_from_spec(
-            spec=spec,
-            style=style,
-            slide_index=slide_index,
-            context_slides=context_slides,
-            language=language,
-        )
+        MAX_RETRIES = 2
+        QUALITY_THRESHOLD = 80
+        best_html = ""
+        best_score = 0.0
+        retry_spec = dict(spec)
 
-        # Rule-based structural check
-        report = self.quality_gate.check_single(html)
-
-        if not report.passed and report.score < 80:
-            retry_spec = dict(spec)
-            retry_spec["quality_feedback"] = (
-                f"Previous attempt had issues: {'; '.join(report.issues)}. "
-                f"Fix these in the new version."
-            )
+        for attempt in range(1 + MAX_RETRIES):
             html = self.generator.generate_from_spec(
                 spec=retry_spec,
                 style=style,
@@ -160,36 +150,56 @@ class PPTAgent:
                 context_slides=context_slides,
                 language=language,
             )
+
+            # Rule-based structural check
             report = self.quality_gate.check_single(html)
 
-        # LLM-based quality check (overflow, readability, completeness)
-        llm_report = self.quality_gate.llm_check_single(html, self.client, self.model)
+            if report.score >= QUALITY_THRESHOLD and report.passed:
+                # LLM-based quality check
+                llm_report = self.quality_gate.llm_check_single(html, self.client, self.model)
+                combined_score = min(report.score, llm_report.score)
 
-        if not llm_report.passed and llm_report.score < 80:
-            retry_spec = dict(spec)
-            feedback_parts = llm_report.issues + [w for w in llm_report.warnings if w]
-            retry_spec["quality_feedback"] = (
-                f"LLM reviewer found issues: {'; '.join(feedback_parts)}. "
-                f"Reduce content amount, ensure nothing overflows viewport. "
-                f"Max 4 bullet points, each under 20 characters."
-            )
-            html = self.generator.generate_from_spec(
-                spec=retry_spec,
-                style=style,
-                slide_index=slide_index,
-                context_slides=context_slides,
-                language=language,
-            )
-            final_report = self.quality_gate.check_single(html)
-            combined_score = min(final_report.score, llm_report.score + 10)
-        else:
-            combined_score = min(report.score, llm_report.score)
+                if combined_score >= QUALITY_THRESHOLD:
+                    return SlideResult(
+                        index=slide_index,
+                        title=spec.get("title", ""),
+                        html=html,
+                        quality_score=combined_score,
+                    )
+
+                # LLM check failed — prepare feedback for retry
+                if combined_score > best_score:
+                    best_html, best_score = html, combined_score
+
+                if attempt < MAX_RETRIES:
+                    feedback_parts = llm_report.issues + [w for w in llm_report.warnings if w]
+                    retry_spec = dict(spec)
+                    retry_spec["quality_feedback"] = (
+                        f"Attempt {attempt+1} scored {combined_score:.0f}/100. "
+                        f"Issues: {'; '.join(feedback_parts)}. "
+                        f"Reduce content, ensure nothing overflows viewport. "
+                        f"Max 4 bullet points, each under 20 characters."
+                    )
+            else:
+                # Rule check failed or score too low
+                combined_score = report.score
+                if combined_score > best_score:
+                    best_html, best_score = html, combined_score
+
+                if attempt < MAX_RETRIES:
+                    all_feedback = report.issues + report.warnings
+                    retry_spec = dict(spec)
+                    retry_spec["quality_feedback"] = (
+                        f"Attempt {attempt+1} scored {combined_score:.0f}/100. "
+                        f"Issues: {'; '.join(all_feedback)}. "
+                        f"Fix these structural problems in the new version."
+                    )
 
         return SlideResult(
             index=slide_index,
             title=spec.get("title", ""),
-            html=html,
-            quality_score=combined_score,
+            html=best_html,
+            quality_score=best_score,
         )
 
     def _split_slides(self, full_html: str, outline: SlideOutline) -> list[SlideResult]:
