@@ -1,11 +1,17 @@
 # PPT Agent
 
+[English](README.md) | [中文](README.zh-CN.md)
+
 **Turn any text or URL into animated, professional slides in 30 seconds.**
 
 An open-source AI presentation generator — no signup, no watermarks, no vendor lock-in. Self-hostable with your own API key. Output is a single HTML file that works anywhere.
 
 <p align="center">
-  <img src="docs/hero-demo.gif" alt="PPT Agent demo — paste URL, get slides" width="720" />
+  <img src="docs/screenshots/home.png" alt="PPT Agent — Home Page" width="720" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/editor.png" alt="PPT Agent — Editor" width="720" />
 </p>
 
 ## Why PPT Agent?
@@ -68,7 +74,7 @@ An open-source AI presentation generator — no signup, no watermarks, no vendor
 ### Option 1: Docker (recommended)
 
 ```bash
-git clone https://github.com/ppt-agent/ppt-agent.git
+git clone https://github.com/cobacha/ppt-agent.git
 cd ppt-agent
 echo "ANTHROPIC_API_KEY=sk-ant-..." > backend/.env
 docker compose up
@@ -179,6 +185,10 @@ ppt-agent/
 
 ## Themes
 
+<p align="center">
+  <img src="docs/screenshots/themes.png" alt="PPT Agent — 18 Themes" width="720" />
+</p>
+
 PPT Agent ships with 18 curated themes designed for different contexts:
 
 | Business | Creative | Technical | Minimal |
@@ -216,5 +226,5 @@ MIT — use it however you want. Commercial use, modification, distribution, all
 <p align="center">
   Built with <a href="https://www.anthropic.com">Claude</a> | 
   <a href="#quick-start">Get Started</a> | 
-  <a href="https://github.com/ppt-agent/ppt-agent/issues">Report Issue</a>
+  <a href="https://github.com/cobacha/ppt-agent/issues">Report Issue</a>
 </p>
