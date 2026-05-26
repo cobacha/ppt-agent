@@ -2,6 +2,10 @@
 
 > Text in, slides out.
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/cobacha/ppt-agent?style=social)](https://github.com/cobacha/ppt-agent)
+[![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)](docker-compose.yml)
+
 [English](README.md) | [中文](README.zh-CN.md)
 
 **Turn any text or URL into animated, professional slides in 30 seconds.**
