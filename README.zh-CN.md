@@ -1,5 +1,7 @@
 # PPT Agent
 
+> Text in, slides out.
+
 [English](README.md) | [中文](README.zh-CN.md)
 
 **输入任意文本或 URL，30 秒生成专业动画演示文稿。**

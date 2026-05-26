@@ -1,5 +1,7 @@
 # PPT Agent
 
+> Text in, slides out.
+
 [English](README.md) | [中文](README.zh-CN.md)
 
 **Turn any text or URL into animated, professional slides in 30 seconds.**
