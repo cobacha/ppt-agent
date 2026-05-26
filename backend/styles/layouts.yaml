@@ -1,0 +1,72 @@
+# Layout Patterns Library
+# Each layout has CSS class, best-fit content types, and CSS snippet
+
+layouts:
+  trend-bands:
+    description: Full-width horizontal strips with colored accent + vertical label + 2-column grid
+    best_for: [parallel_trends, categories, themes]
+    css_class: trend-bands
+    children: trend-band
+
+  cascade-grid:
+    description: 3-column staggered cards with increasing top margin
+    best_for: [three_items, phases, priorities]
+    css_class: cascade-grid
+    children: cascade-card
+
+  scorecard-strip:
+    description: Horizontal row of metric items with fill bars
+    best_for: [kpis, ratings, capabilities]
+    css_class: scorecard-strip
+    children: scorecard-item
+
+  asym-compare:
+    description: Large card (3fr) + stacked small cards (2fr)
+    best_for: [pros_cons, strengths_weaknesses, main_vs_secondary]
+    css_class: asym-compare
+
+  editorial-split:
+    description: 60/40 or 70/30 left-right content split
+    best_for: [explanation_with_visual, text_plus_diagram, narrative_with_data]
+    css_class: editorial-split
+
+  h-track:
+    description: Equal-width horizontal panels with dividers
+    best_for: [timeline_phases, parallel_processes, before_after]
+    css_class: h-track
+    children: h-track-item
+
+  dual-timeline:
+    description: Two columns with center connector line
+    best_for: [milestones, parallel_tracks, plan_vs_actual]
+    css_class: dual-timeline
+
+  kpi-hero-row:
+    description: 3-4 large metric boxes in a prominent row
+    best_for: [key_numbers, headline_stats, progress_indicators]
+    css_class: kpi-hero-row
+    children: kpi-hero
+
+  opp-ladder:
+    description: Numbered step rows with colored left border and hover effect
+    best_for: [ordered_list, roadmap, ranked_items, opportunities]
+    css_class: opp-ladder
+    children: opp-step
+
+  risk-stack:
+    description: 3-column gauge cards (severity | description | response)
+    best_for: [risks, issues, challenges, constraints]
+    css_class: risk-stack
+    children: risk-card
+
+  data-table:
+    description: Corporate navy-header table (use max once per deck)
+    best_for: [structured_data, feature_matrix, comparison_table]
+    css_class: data-table
+    max_per_deck: 1
+
+  grid-3:
+    description: Basic 3-column equal cards
+    best_for: [three_equal_items]
+    css_class: grid-3
+    max_per_deck: 1

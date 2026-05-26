@@ -1,0 +1,44 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+venv/
+.venv/
+
+# Node
+node_modules/
+.next/
+.vercel/
+*.tsbuildinfo
+
+# Output & data
+output/
+backend/data/
+*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Development screenshots (not docs/)
+/gen-view-*.png
+/generating-view-*.png
+/home-*.png
+
+# Claude Code local
+.claude/
+
+# Playwright MCP snapshots
+.playwright-mcp/
+
+# Docker volumes
+.docker/

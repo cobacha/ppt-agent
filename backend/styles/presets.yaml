@@ -1,0 +1,340 @@
+# Style Presets Configuration
+# Each preset defines fonts, colors, and signature design elements
+
+bold-signal:
+  name: 醒目信号
+  vibe: 自信、大胆、现代、高冲击力
+  fonts:
+    display: Archivo Black
+    body: Space Grotesk
+    source: google
+  colors:
+    bg_primary: "#1a1a1a"
+    bg_gradient: "linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 50%, #1a1a1a 100%)"
+    card_bg: "#FF5722"
+    text_primary: "#ffffff"
+    accent: "#FF5722"
+  signature:
+    - Bold colored card as focal point
+    - Large section numbers (01, 02, etc.)
+    - Grid-based precise alignment
+
+electric-studio:
+  name: 电子工坊
+  vibe: 科技、简洁、专业、高对比
+  fonts:
+    display: Manrope
+    body: Manrope
+    source: google
+  colors:
+    bg_primary: "#0a0a0a"
+    bg_white: "#ffffff"
+    accent: "#4361ee"
+    text_primary: "#ffffff"
+  signature:
+    - Two-panel vertical split
+    - Accent bar on panel edge
+    - Minimal confident spacing
+
+dark-botanical:
+  name: 暗夜花园
+  vibe: 优雅、精致、艺术、高端
+  fonts:
+    display: Cormorant
+    body: IBM Plex Sans
+    source: google
+  colors:
+    bg_primary: "#0f0f0f"
+    text_primary: "#e8e4df"
+    accent_warm: "#d4a574"
+    accent_pink: "#e8b4b8"
+  signature:
+    - Abstract soft gradient circles
+    - Warm color accents (pink, gold, terracotta)
+    - Italic signature typography
+
+notebook-tabs:
+  name: 笔记标签
+  vibe: 编辑风、有条理、雅致、触感丰富
+  fonts:
+    display: Bodoni Moda
+    body: DM Sans
+    source: google
+  colors:
+    bg_outer: "#2d2d2d"
+    bg_page: "#f8f6f1"
+    text_primary: "#1a1a1a"
+    tabs: ["#98d4bb", "#c7b8ea", "#f4b8c5", "#a8d8ea"]
+  signature:
+    - Paper container with shadow
+    - Colorful section tabs on right edge
+    - Binder hole decorations
+
+corporate-navy:
+  name: 商务蓝调
+  vibe: 专业、可信赖、咨询级品质
+  fonts:
+    display: Space Grotesk
+    body: Space Grotesk
+    source: google
+  colors:
+    bg_primary: "#f8f9fc"
+    text_primary: "#1a1a2e"
+    accent_blue: "#0052d9"
+    accent_green: "#059669"
+    accent_purple: "#7c3aed"
+  signature:
+    - Light background with white cards
+    - Navy tables with colored badges
+    - Restrained hover effects
+    - CSS counter page numbering
+
+neon-cyber:
+  name: 霓虹赛博
+  vibe: 未来感、赛博朋克、极客、视觉冲击
+  fonts:
+    display: Orbitron
+    body: JetBrains Mono
+    source: google
+  colors:
+    bg_primary: "#0a0014"
+    text_primary: "#e0e0ff"
+    accent_cyan: "#00f5ff"
+    accent_magenta: "#ff00e5"
+    accent_yellow: "#f0ff00"
+  signature:
+    - Neon glow effects on text
+    - Grid/scanline background patterns
+    - Terminal-style monospace elements
+    - High saturation accent colors
+
+pastel-geometry:
+  name: 柔光几何
+  vibe: 清新、活力、年轻、友好
+  fonts:
+    display: Quicksand
+    body: Nunito
+    source: google
+  colors:
+    bg_primary: "#fef9f4"
+    text_primary: "#2d2d2d"
+    accent_coral: "#ff7f7f"
+    accent_mint: "#7fdfbf"
+    accent_lavender: "#b8a9f0"
+    accent_peach: "#ffb07f"
+  signature:
+    - Geometric shapes (circles, triangles) as decoration
+    - Soft pastel gradients
+    - Rounded corners everywhere
+    - Playful asymmetric layouts
+
+vintage-editorial:
+  name: 复古报刊
+  vibe: 怀旧、权威、知性、经典
+  fonts:
+    display: Playfair Display
+    body: Source Serif Pro
+    source: google
+  colors:
+    bg_primary: "#f5f0e8"
+    text_primary: "#1a1a1a"
+    accent_red: "#c0392b"
+    accent_gold: "#b8860b"
+    border: "#2c2c2c"
+  signature:
+    - Newspaper column layouts
+    - Decorative borders and rules
+    - Drop caps and pull quotes
+    - Sepia-toned color palette
+
+zen-minimal:
+  name: 禅意留白
+  vibe: 极简、东方美学、宁静、呼吸感
+  fonts:
+    display: Noto Serif SC
+    body: Noto Sans SC
+    source: google
+  colors:
+    bg_primary: "#fafaf8"
+    text_primary: "#2c2c2c"
+    accent_ink: "#1a1a1a"
+    accent_stone: "#9ca3af"
+    accent_bamboo: "#6b8e6b"
+  signature:
+    - Extreme whitespace and breathing room
+    - Single focal element per slide
+    - Ink-wash inspired subtle textures
+    - Vertical text support
+
+sketch-whiteboard:
+  name: 手绘白板
+  vibe: 轻松、创意、头脑风暴、灵动
+  fonts:
+    display: Caveat
+    body: Patrick Hand
+    source: google
+  colors:
+    bg_primary: "#ffffff"
+    text_primary: "#333333"
+    accent_blue: "#4a90d9"
+    accent_red: "#e74c3c"
+    accent_yellow: "#f1c40f"
+    border: "#333333"
+  signature:
+    - Hand-drawn style borders and arrows
+    - Whiteboard marker aesthetic
+    - Sticky note and doodle decorations
+    - Informal sketch-like layouts
+
+isometric-tech:
+  name: 等距科幻
+  vibe: 立体、未来、工程感、结构化
+  fonts:
+    display: Rajdhani
+    body: Exo 2
+    source: google
+  colors:
+    bg_primary: "#1a1a2e"
+    text_primary: "#e0e0e0"
+    accent_teal: "#00d4aa"
+    accent_orange: "#ff6b35"
+    grid: "#2a2a4a"
+  signature:
+    - Isometric grid backgrounds
+    - 3D-like geometric shapes
+    - Technical blueprint aesthetic
+    - Layered depth with shadows
+
+split-contrast:
+  name: 撞色分割
+  vibe: 大胆、对比、戏剧、前卫
+  fonts:
+    display: Bebas Neue
+    body: Work Sans
+    source: google
+  colors:
+    bg_left: "#000000"
+    bg_right: "#ffffff"
+    text_left: "#ffffff"
+    text_right: "#000000"
+    accent: "#ff3366"
+  signature:
+    - Sharp diagonal or vertical split between black and white
+    - Text crosses the boundary
+    - Single accent color for emphasis
+    - Maximum contrast ratio
+
+clay-3d:
+  name: 3D 黏土
+  vibe: 趣味、立体、温暖、品牌感
+  fonts:
+    display: Fredoka
+    body: Nunito Sans
+    source: google
+  colors:
+    bg_primary: "#f0e6ff"
+    text_primary: "#2d1b4e"
+    accent_purple: "#7c3aed"
+    accent_orange: "#fb923c"
+    accent_pink: "#f472b6"
+    shadow: "#c4b5fd"
+  signature:
+    - Soft 3D shadows and rounded elements
+    - Clay/blob-like decorative shapes
+    - Warm gradient backgrounds
+    - Playful proportions
+
+terminal-hacker:
+  name: 终端黑客
+  vibe: 极客、代码、命令行、矩阵风
+  fonts:
+    display: Fira Code
+    body: Fira Code
+    source: google
+  colors:
+    bg_primary: "#0d1117"
+    text_primary: "#c9d1d9"
+    accent_green: "#39d353"
+    accent_yellow: "#e3b341"
+    accent_red: "#f85149"
+    border: "#30363d"
+  signature:
+    - Terminal window chrome (title bar with dots)
+    - Monospace everything
+    - Syntax highlighting colors
+    - Command prompt aesthetics
+
+watercolor-art:
+  name: 水彩画境
+  vibe: 艺术、流动、手工感、诗意
+  fonts:
+    display: Libre Baskerville
+    body: Lora
+    source: google
+  colors:
+    bg_primary: "#fdfcfa"
+    text_primary: "#2c3e50"
+    wash_blue: "#74b9ff"
+    wash_pink: "#fd79a8"
+    wash_green: "#55efc4"
+  signature:
+    - Watercolor wash backgrounds
+    - Soft bleeding edges
+    - Hand-painted texture feel
+    - Organic flowing shapes
+
+swiss-modern:
+  name: 瑞士现代
+  vibe: 网格、秩序、理性、国际主义
+  fonts:
+    display: Inter
+    body: Inter
+    source: google
+  colors:
+    bg_primary: "#ffffff"
+    text_primary: "#000000"
+    accent_red: "#ff0000"
+    grid: "#e5e5e5"
+  signature:
+    - Strict grid system
+    - Helvetica-style typography
+    - Red as only accent color
+    - Mathematical precision
+
+dark-gold-luxury:
+  name: 暗金典藏
+  vibe: 尊贵、颁奖典礼、黑金、仪式感
+  fonts:
+    display: Cinzel
+    body: Montserrat
+    source: google
+  colors:
+    bg_primary: "#0a0a0a"
+    text_primary: "#f5f5f5"
+    gold: "#d4af37"
+    gold_light: "#f4e4a6"
+  signature:
+    - Black background with gold accents
+    - Ornate borders and flourishes
+    - Serif display typography
+    - Award ceremony aesthetic
+
+gradient-aurora:
+  name: 极光渐变
+  vibe: 梦幻、沉浸、灵感、视觉盛宴
+  fonts:
+    display: Outfit
+    body: Outfit
+    source: google
+  colors:
+    bg_primary: "#0f0f23"
+    text_primary: "#ffffff"
+    gradient_1: "#667eea"
+    gradient_2: "#764ba2"
+    gradient_3: "#f093fb"
+    gradient_4: "#4facfe"
+  signature:
+    - Full-bleed gradient backgrounds
+    - Glass-morphism card effects
+    - Fluid color transitions
+    - Frosted glass overlays
