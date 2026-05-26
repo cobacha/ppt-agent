@@ -40,5 +40,8 @@ backend/data/
 # Playwright MCP snapshots
 .playwright-mcp/
 
+# Launch/promo drafts (not shipped)
+docs/launch-posts.md
+
 # Docker volumes
 .docker/
