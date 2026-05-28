@@ -51,10 +51,9 @@ _agent: PPTAgent | None = None
 
 
 def get_agent() -> PPTAgent:
-    """Return the singleton PPTAgent (thread-safe: no mutable state modified)."""
-    global _agent
+    """Return the singleton PPTAgent initialized during lifespan."""
     if _agent is None:
-        _agent = PPTAgent()
+        raise HTTPException(status_code=503, detail="服务正在启动，请稍后重试")
     return _agent
 
 
@@ -70,7 +69,8 @@ class RateLimiter:
     def is_allowed(self, ip: str) -> bool:
         now = time.time()
         cutoff = now - self.window_seconds
-        # Clean old entries for this IP
+        if len(self._requests) > 5000:
+            self.cleanup()
         self._requests[ip] = [t for t in self._requests[ip] if t > cutoff]
         if len(self._requests[ip]) >= self.max_requests:
             return False
@@ -112,11 +112,17 @@ def _check_admin(request: Request):
 
 # --- Lifespan ---
 async def _periodic_rate_limiter_cleanup():
-    """Purge stale IPs every 5 minutes to prevent unbounded memory growth."""
+    """Purge stale IPs and expired request IDs every 5 minutes."""
     import asyncio
     while True:
         await asyncio.sleep(300)
         rate_limiter.cleanup()
+        # Sweep expired request IDs (>10 min old)
+        now = time.time()
+        cutoff = now - 600
+        expired = [k for k, (_, ts) in _recent_request_ids.items() if ts <= cutoff]
+        for k in expired:
+            _recent_request_ids.pop(k, None)
 
 
 @asynccontextmanager
@@ -296,18 +302,27 @@ def _safe_filename(title: str, ext: str) -> str:
 @app.get("/api/health")
 async def health():
     """Health check for monitoring and Docker healthcheck."""
+    agent_ready = _agent is not None
+    api_key_ok = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY"))
     db_ok = False
     try:
         db_ok = get_generation("__healthcheck__") is None or True
     except Exception:
         pass
-    return {
-        "status": "ok" if db_ok else "degraded",
-        "model": os.environ.get("MODEL_ID", "claude-sonnet-4-6"),
-        "version": "1.0.0",
-        "api_key_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
-        "db": "ok" if db_ok else "error",
-    }
+    healthy = agent_ready and api_key_ok and db_ok
+    status_code = 200 if healthy else 503
+    return Response(
+        status_code=status_code,
+        content=json.dumps({
+            "status": "ok" if healthy else "unhealthy",
+            "model": os.environ.get("MODEL_ID", "claude-sonnet-4-6"),
+            "version": "1.0.0",
+            "agent": agent_ready,
+            "api_key": api_key_ok,
+            "db": "ok" if db_ok else "error",
+        }),
+        media_type="application/json",
+    )
 
 
 class ImportURLRequest(BaseModel):
@@ -371,10 +386,7 @@ async def import_url(req: ImportURLRequest):
     if "text/html" not in content_type and "application/xhtml" not in content_type:
         raise HTTPException(status_code=422, detail="仅支持 HTML 页面，PDF 等格式请直接粘贴文本")
 
-    if len(resp.content) > 50 * 1024:
-        html_text = resp.content[:50 * 1024].decode("utf-8", errors="ignore")
-    else:
-        html_text = resp.text
+    html_text = resp.text[:50000] if len(resp.text) > 50000 else resp.text
 
     soup = BeautifulSoup(html_text, "html.parser")
 
@@ -629,7 +641,6 @@ async def generate_stream(req: StreamRequest, request: Request):
                         if buffer:
                             think_queue.put(buffer)
                     except Exception as e:
-                        think_queue.put(None)
                         raise
                     finally:
                         think_queue.put(None)  # sentinel
@@ -800,14 +811,12 @@ async def generate_stream(req: StreamRequest, request: Request):
                             "layout_used": outline.slides[result["index"]].suggested_layout,
                             "html": result["html"],
                         })
-                        # Persist slide to DB
                         idx = result["index"]
                         if idx < len(db_slides):
                             db_slides[idx] = {
                                 "index": idx, "title": result["title"],
                                 "html": result["html"], "quality_score": result.get("quality_score", 0),
                             }
-                            update_generation_slides(gen_id, db_slides, gen_title)
 
                 # Retry failed slides once, then emit fallback
                 for failed_idx, failed_spec in failed_slides:
@@ -844,7 +853,6 @@ async def generate_stream(req: StreamRequest, request: Request):
                                 "index": failed_idx, "title": slide_title,
                                 "html": retry_result.html, "quality_score": retry_result.quality_score,
                             }
-                            update_generation_slides(gen_id, db_slides, gen_title)
                     except Exception as retry_err:
                         logger.warning(f"Retry also failed for slide {failed_idx}: {retry_err}")
                         safe_title = html_mod.escape(slide_title)
@@ -862,7 +870,9 @@ async def generate_stream(req: StreamRequest, request: Request):
                                 "index": failed_idx, "title": slide_title,
                                 "html": fallback_html, "quality_score": 0,
                             }
-                            update_generation_slides(gen_id, db_slides, gen_title)
+
+                # Persist all slides from this batch in one DB write
+                update_generation_slides(gen_id, db_slides, gen_title)
 
             complete_generation(gen_id, "completed")
             generation_completed = True
@@ -974,6 +984,7 @@ async def export_html(req: ExportRequest):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data: https:; script-src 'unsafe-inline';">
 <title>{html_mod.escape(req.title) if req.title else 'Generated Presentation'}</title>
 {font_import}
 <style>
@@ -1469,7 +1480,7 @@ async def export_pptx(req: ExportRequest):
     )
 
 
-@app.get("/preview/{filename}", response_class=HTMLResponse)
+@app.get("/preview/{filename}")
 async def preview_file(filename: str):
     if ".." in filename or "/" in filename or "\\" in filename:
         raise HTTPException(400, "Invalid filename")
@@ -1478,7 +1489,14 @@ async def preview_file(filename: str):
         raise HTTPException(400, "Invalid filename")
     if not path.exists():
         raise HTTPException(404)
-    return path.read_text(encoding="utf-8")
+    content = path.read_text(encoding="utf-8")
+    return Response(
+        content=content,
+        media_type="text/html",
+        headers={
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data: https:; script-src 'unsafe-inline'",
+        },
+    )
 
 
 # --- History API ---

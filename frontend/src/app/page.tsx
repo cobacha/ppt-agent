@@ -58,6 +58,7 @@ export default function Home() {
   const [urlLoading, setUrlLoading] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
   const [language, setLanguage] = useState<"zh" | "en">("zh");
+  const [styleError, setStyleError] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const { history, deleteItem: deleteHistoryItem, reload: reloadHistory } = useHistory();
 
@@ -67,6 +68,8 @@ export default function Home() {
       if (data.presets.length > 0 && !selectedStyle) {
         setSelectedStyle(data.presets[0].id);
       }
+    }).catch(() => {
+      setStyleError("无法加载风格列表，请检查后端服务是否正常运行");
     });
   }, []);
 
@@ -313,6 +316,9 @@ export default function Home() {
         <h2 className="text-sm font-semibold text-gray-500 mb-3">
           选择风格 <span className="font-normal text-gray-400">（{presets.length} 种）</span>
         </h2>
+        {styleError && (
+          <p className="text-sm text-red-500 mb-3">{styleError}</p>
+        )}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           {presets.map((preset) => (
             <TemplateCard
@@ -346,7 +352,7 @@ export default function Home() {
                       <iframe
                         srcDoc={`<!DOCTYPE html><html><head><style>html,body{margin:0;padding:0;overflow:hidden;height:100%;pointer-events:none;}</style></head><body>${genState.slides[0].html}</body></html>`}
                         className="w-full h-full border-0 pointer-events-none"
-                        sandbox="allow-same-origin"
+                        sandbox=""
                         tabIndex={-1}
                         loading="lazy"
                       />
@@ -401,7 +407,7 @@ export default function Home() {
                           <iframe
                             srcDoc={`<!DOCTYPE html><html><head><style>html,body{margin:0;padding:0;overflow:hidden;height:100%;pointer-events:none;}</style></head><body>${entry.first_slide_html}</body></html>`}
                             className="w-full h-full border-0 pointer-events-none"
-                            sandbox="allow-same-origin"
+                            sandbox=""
                             tabIndex={-1}
                             loading="lazy"
                           />

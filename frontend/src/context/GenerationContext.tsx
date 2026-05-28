@@ -92,6 +92,7 @@ type DoneListener = (event: GenerationDoneEvent) => void;
 export function GenerationProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<EditorState>(INITIAL_STATE);
   const [genId, setGenId] = useState<string | null>(null);
+  const genIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const doneListenersRef = useRef<Set<DoneListener>>(new Set());
   const genContentRef = useRef<string>("");
@@ -104,6 +105,7 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => { slidesRef.current = state.slides; }, [state.slides]);
+  useEffect(() => { genIdRef.current = genId; }, [genId]);
 
   // Undo stack
   const undoStackRef = useRef<SlideDTO[][]>([]);
@@ -450,7 +452,7 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
   const layouts = useMemo(() => Object.keys(layoutMap), [layoutMap]);
 
   useEffect(() => {
-    fetchLayouts().then((data) => setLayoutMap(data.layouts));
+    fetchLayouts().then((data) => setLayoutMap(data.layouts)).catch(() => {});
   }, []);
 
   const recoverActiveGeneration = useCallback(async (): Promise<boolean> => {
@@ -539,7 +541,7 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
               slide_index: idx,
               content,
               layout: "auto",
-              style: state.style,
+              style: genStyleRef.current || state.style,
               context_slides: contextSlides,
             });
 
@@ -581,7 +583,7 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
           style: genStyleRef.current,
           slides: s.slides,
           title: s.title,
-          gen_id: genId || undefined,
+          gen_id: genIdRef.current || undefined,
         };
         setTimeout(() => {
           doneListenersRef.current.forEach((fn) => fn(event));
@@ -589,7 +591,8 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
         return { ...s, generating: false, loading: false, progress: null };
       });
     }
-  }, [state.style, genId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const contextValue = useMemo(() => ({
     state,

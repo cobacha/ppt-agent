@@ -17,6 +17,7 @@ def _get_conn():
     conn = sqlite3.connect(str(DB_PATH), timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")
     try:
         yield conn
@@ -144,10 +145,11 @@ def delete_generation(gen_id: str) -> bool:
 
 def cleanup_stale_generations(max_age_hours: int = 2):
     """Mark generations stuck in 'generating' status as failed after max_age_hours."""
-    cutoff = datetime.now(timezone.utc)
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
     with _get_conn() as conn:
         conn.execute(
-            "UPDATE generations SET status = 'failed' WHERE status = 'generating' AND created_at < datetime('now', ?)",
-            (f"-{max_age_hours} hours",),
+            "UPDATE generations SET status = 'failed' WHERE status = 'generating' AND created_at < ?",
+            (cutoff,),
         )
         conn.commit()

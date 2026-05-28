@@ -40,8 +40,8 @@ class HTMLGenerator:
         response = self.client.chat_completion(
             system=system,
             messages=[{"role": "user", "content": user_msg}],
-            max_tokens=128000,
-            timeout=60.0,
+            max_tokens=32000,
+            timeout=120.0,
         )
 
         return self._extract_html(response.text)
@@ -167,8 +167,8 @@ Use the '{layout}' layout pattern. Include relevant inline styles."""
         response = self.client.chat_completion(
             system="Fix quality issues in this HTML presentation. Return the complete corrected HTML only.",
             messages=[{"role": "user", "content": f"Issues:\n{feedback_text}\n\nHTML:\n{html}"}],
-            max_tokens=64000,
-            timeout=60.0,
+            max_tokens=16000,
+            timeout=90.0,
         )
 
         return self._extract_html(response.text)

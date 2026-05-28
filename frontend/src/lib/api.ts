@@ -71,13 +71,20 @@ export async function regenerateSlide(params: {
   context?: string;
   context_slides?: Record<string, unknown>[];
 }): Promise<{ html: string; quality_score: number }> {
-  const res = await fetch(`${API_BASE}/api/regen`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-  if (!res.ok) throw new Error(`Regeneration failed: ${res.statusText}`);
-  return res.json();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
+  try {
+    const res = await fetch(`${API_BASE}/api/regen`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Regeneration failed: ${res.statusText}`);
+    return res.json();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export interface OutlineSlide {

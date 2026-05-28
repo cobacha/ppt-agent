@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { SlideDTO } from "@/lib/api";
 
 interface Props {
@@ -12,7 +12,6 @@ interface Props {
 export default function PresenterMode({ slides, startIndex, onExit }: Props) {
   const [current, setCurrent] = useState(startIndex);
   const [elapsed, setElapsed] = useState(0);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     const id = setInterval(() => setElapsed((e) => e + 1), 1000);
@@ -42,17 +41,7 @@ export default function PresenterMode({ slides, startIndex, onExit }: Props) {
     return () => document.removeEventListener("keydown", handler);
   }, [go, onExit]);
 
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-    const doc = iframe.contentDocument;
-    if (!doc) return;
-    doc.open();
-    doc.write(
-      `<!DOCTYPE html><html><head><style>html,body{margin:0;padding:0;overflow:hidden;height:100%;}</style></head><body>${slides[current]?.html || ""}</body></html>`
-    );
-    doc.close();
-  }, [current, slides]);
+  const srcdoc = `<!DOCTYPE html><html><head><style>html,body{margin:0;padding:0;overflow:hidden;height:100%;}</style></head><body>${slides[current]?.html || ""}</body></html>`;
 
   const formatTime = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
@@ -62,9 +51,9 @@ export default function PresenterMode({ slides, startIndex, onExit }: Props) {
       <div className="flex-1 flex items-center justify-center">
         <div className="w-full h-full" style={{ aspectRatio: "16/9", maxHeight: "100vh" }}>
           <iframe
-            ref={iframeRef}
             className="w-full h-full border-0"
-            sandbox="allow-same-origin allow-scripts"
+            sandbox=""
+            srcDoc={srcdoc}
           />
         </div>
       </div>

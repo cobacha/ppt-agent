@@ -7,7 +7,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Persist SQLite history across container restarts
+RUN adduser --disabled-password --gecos "" appuser && \
+    mkdir -p /app/data /app/output && \
+    chown -R appuser:appuser /app/data /app/output
+USER appuser
+
 VOLUME /app/data
 
 EXPOSE 8001

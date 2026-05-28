@@ -2,6 +2,7 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    stop_grace_period: 60s
     ports:
       - "8001:8001"
     env_file:

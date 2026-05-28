@@ -70,9 +70,9 @@ function EditorPage() {
     if (historyId) {
       fetchHistoryDetail(historyId).then((detail) => {
         loadSlides(detail.slides, detail.style, detail.title);
-        // Store in sessionStorage for "regenerate all" to work
         sessionStorage.setItem("ppt-agent-content", detail.content);
         sessionStorage.setItem("ppt-agent-style", detail.style);
+        localStorage.removeItem("ppt-draft");
       }).catch(() => {
         router.push("/");
       });
@@ -124,9 +124,14 @@ function EditorPage() {
   }, [onDone, saveToHistory]);
 
   const handleRegenerateAll = () => {
+    if (state.generating) return;
     const content = sessionStorage.getItem("ppt-agent-content");
     const style = sessionStorage.getItem("ppt-agent-style");
-    if (!content || !style) return;
+    if (!content || !style) {
+      setToast("原始内容不可用，请返回首页重新输入");
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
     if (!confirm(`确定重新生成全部 ${state.slides.length} 页吗？当前编辑将丢失。`)) return;
     generate(content, style);
   };
@@ -138,17 +143,6 @@ function EditorPage() {
     sessionStorage.setItem("ppt-agent-style", styleId);
     genStartRef.current = Date.now();
     generate(content, styleId);
-  };
-
-  const handleRetryFailed = async () => {
-    const failedIndices = state.slides
-      .map((s, i) => (s.html === "__FAILED__" ? i : -1))
-      .filter((i) => i >= 0);
-    for (const idx of failedIndices) {
-      const slide = state.slides[idx];
-      const content = slide.detailed_content || slide.bullets?.join("\n") || slide.title;
-      await regenSlide(idx, content, "auto");
-    }
   };
 
   const incompleteSlides = state.slides.filter(s => !s.html || s.html === "__FAILED__");
@@ -166,7 +160,6 @@ function EditorPage() {
   const dirtyRef = useRef(false);
 
   const guardedSetActiveSlide = useCallback((index: number) => {
-    if (dirtyRef.current && !confirm("当前页面内容已修改但未重新生成，确定切换吗？")) return;
     dirtyRef.current = false;
     setActiveSlide(index);
   }, [setActiveSlide]);
@@ -258,7 +251,13 @@ function EditorPage() {
   }
 
   if (state.slides.length === 0 && !state.error) {
-    return <GeneratingView thinking={state.thinking} onCancel={() => { cancel(); router.push("/"); }} />;
+    return <GeneratingView thinking={state.thinking} onCancel={() => {
+      if (!confirm("确定取消生成吗？已生成的内容将丢失。")) return;
+      cancel();
+      sessionStorage.removeItem("ppt-agent-content");
+      sessionStorage.removeItem("ppt-agent-style");
+      router.push("/");
+    }} />;
   }
 
   return (
@@ -396,7 +395,7 @@ function EditorPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-8 text-center shadow-2xl">
             <div className="animate-spin w-10 h-10 border-3 border-blue-600 border-t-transparent rounded-full mx-auto mb-4" />
-            <p className="font-medium">正在渲染 PDF...</p>
+            <p className="font-medium">正在渲染...</p>
             <p className="text-sm text-gray-400 mt-1">通常需要 5-10 秒</p>
           </div>
         </div>

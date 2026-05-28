@@ -147,6 +147,9 @@ export function streamGeneration(
                   case "error":
                     callbacks.onError(data as SSEErrorEvent);
                     break;
+                  case "resume":
+                    callbacks.onDone(data as { gen_id?: string });
+                    return;
                   case "done":
                     callbacks.onDone(data as { gen_id?: string });
                     return;

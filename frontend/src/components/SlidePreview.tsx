@@ -17,6 +17,7 @@ function SlidePreview({ html, onContentEdit, loading = false }: Props) {
   const [transitioning, setTransitioning] = useState(false);
   const prevHtmlRef = useRef<string>("");
   const observerRef = useRef<MutationObserver | null>(null);
+  const injectVersionRef = useRef(0);
   const onContentEditRef = useRef(onContentEdit);
   onContentEditRef.current = onContentEdit;
 
@@ -69,9 +70,6 @@ function SlidePreview({ html, onContentEdit, loading = false }: Props) {
     const iframe = iframeRef.current;
     if (!iframe) return;
 
-    const doc = iframe.contentDocument;
-    if (!doc) return;
-
     // Disconnect previous observer
     if (observerRef.current) {
       observerRef.current.disconnect();
@@ -79,25 +77,16 @@ function SlidePreview({ html, onContentEdit, loading = false }: Props) {
     }
     setIsDirty(false);
 
-    doc.open();
-    doc.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <style>
-          html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; }
-          [contenteditable="true"]:hover { outline: 2px dashed rgba(59,130,246,0.5); cursor: text; }
-          [contenteditable="true"]:focus { outline: 2px solid #3b82f6; background: rgba(59,130,246,0.03); }
-        </style>
-      </head>
-      <body>${html}</body>
-      </html>
-    `);
-    doc.close();
+    const version = ++injectVersionRef.current;
+    const content = `<!DOCTYPE html><html><head><style>html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; } [contenteditable="true"]:hover { outline: 2px dashed rgba(59,130,246,0.5); cursor: text; } [contenteditable="true"]:focus { outline: 2px solid #3b82f6; background: rgba(59,130,246,0.03); }</style></head><body>${html}</body></html>`;
+    iframe.srcdoc = content;
 
     if (onContentEditRef.current) {
       const setupEditable = () => {
-        doc.querySelectorAll("h1, h2, h3, h4, h5, h6, p, li, span, td, th").forEach((el) => {
+        if (injectVersionRef.current !== version) return;
+        const iframeDoc = iframe.contentDocument;
+        if (!iframeDoc || !iframeDoc.body) return;
+        iframeDoc.querySelectorAll("h1, h2, h3, h4, h5, h6, p, li, span, td, th").forEach((el) => {
           const htmlEl = el as HTMLElement;
           if (htmlEl.children.length === 0 || htmlEl.textContent?.trim()) {
             htmlEl.setAttribute("contenteditable", "true");
@@ -107,7 +96,7 @@ function SlidePreview({ html, onContentEdit, loading = false }: Props) {
         const observer = new MutationObserver(() => {
           setIsDirty(true);
         });
-        observer.observe(doc.body, {
+        observer.observe(iframeDoc.body, {
           childList: true,
           subtree: true,
           characterData: true,
@@ -115,12 +104,7 @@ function SlidePreview({ html, onContentEdit, loading = false }: Props) {
         observerRef.current = observer;
       };
 
-      // Defer setup to ensure DOM is fully parsed
-      if (doc.readyState === "complete") {
-        setupEditable();
-      } else {
-        iframe.addEventListener("load", setupEditable, { once: true });
-      }
+      iframe.addEventListener("load", setupEditable, { once: true });
     }
   }, [html]);
 
@@ -175,7 +159,7 @@ function SlidePreview({ html, onContentEdit, loading = false }: Props) {
         <iframe
           ref={iframeRef}
           className={`absolute inset-0 w-full h-full border-0 transition-opacity duration-150 ${transitioning ? "opacity-0" : "opacity-100"}`}
-          sandbox="allow-same-origin allow-scripts"
+          sandbox="allow-same-origin"
           title="Slide Preview"
         />
       </div>

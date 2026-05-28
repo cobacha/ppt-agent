@@ -154,7 +154,7 @@ export default function GeneratingView({ thinking, onCancel }: Props) {
           {onCancel && (
             <button
               onClick={onCancel}
-              className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              className="text-sm text-gray-500 hover:text-red-600 transition-colors font-medium"
             >
               取消生成
             </button>
