@@ -31,8 +31,8 @@ export default function SlideList({ slides, activeIndex, onSelect, onReorder, ge
           const batchStart = generatingProgress?.batchStart;
           const batchEnd = generatingProgress?.batchEnd;
           const hasBatchInfo = batchStart != null && batchEnd != null;
-          const isActivelyGenerating = generating && !isCompleted && !isFailed && hasBatchInfo && i >= batchStart && i < batchEnd;
-          const isQueued = generating && !isCompleted && !isFailed && (hasBatchInfo ? i >= batchEnd : true);
+          const isActivelyGenerating = generating && !isCompleted && hasBatchInfo && i >= batchStart && i < batchEnd;
+          const isQueued = generating && !isCompleted && !isActivelyGenerating && (hasBatchInfo ? i >= batchEnd : !isFailed);
           const isRegenerating = regeneratingIndex === i;
           const isActive = i === activeIndex;
 
@@ -98,7 +98,7 @@ export default function SlideList({ slides, activeIndex, onSelect, onReorder, ge
               {isQueued && !isRegenerating && (
                 <span className="text-xs text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded flex-shrink-0">排队</span>
               )}
-              {isFailed && (
+              {isFailed && !isActivelyGenerating && !isQueued && (
                 <span className="text-xs text-red-600 bg-red-100 px-1.5 py-0.5 rounded flex-shrink-0">失败</span>
               )}
               {isCompleted && !isRegenerating && slide.quality_score > 0 && (

@@ -363,7 +363,7 @@ function EditorPage() {
               <SlidePreview
                 html={activeSlide.html}
                 onContentEdit={handleContentEdit}
-                loading={state.loading}
+                loading={state.loading && !state.generating}
               />
             ) : activeSlide ? (
               <div className="w-full h-full flex items-center justify-center bg-gray-50 rounded-lg border border-gray-200">
