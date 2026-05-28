@@ -73,6 +73,30 @@ export default function Home() {
   // Reload history when background generation completes
   useEffect(() => onDone(() => reloadHistory()), [onDone, reloadHistory]);
 
+  // Auto-save draft to localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("ppt-draft");
+    if (saved) {
+      try {
+        const draft = JSON.parse(saved);
+        if (draft.content) setContent(draft.content);
+        if (draft.style) setSelectedStyle(draft.style);
+        if (draft.language) setLanguage(draft.language);
+        if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
+        if (draft.slideCountPref) setSlideCountPref(draft.slideCountPref);
+      } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (content.trim()) {
+        localStorage.setItem("ppt-draft", JSON.stringify({ content, style: selectedStyle, language, aspectRatio, slideCountPref }));
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [content, selectedStyle, language, aspectRatio, slideCountPref]);
+
 
   const handleImportUrl = async () => {
     if (!urlInput.trim()) return;
@@ -92,6 +116,7 @@ export default function Home() {
 
   const handleGenerate = () => {
     if (!content.trim() || !selectedStyle) return;
+    localStorage.removeItem("ppt-draft");
     // Keep sessionStorage as fallback for page refresh
     sessionStorage.setItem("ppt-agent-content", content);
     sessionStorage.setItem("ppt-agent-style", selectedStyle);
@@ -180,6 +205,7 @@ export default function Home() {
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="粘贴演示文稿内容 — 支持 Markdown、大纲或纯文本..."
+              aria-label="演示文稿内容输入"
               className="w-full h-28 text-sm resize-none border-0 focus:outline-none font-mono placeholder:font-sans"
             />
           ) : (
@@ -209,72 +235,71 @@ export default function Home() {
           )}
 
           {/* Bottom bar: controls + generate button */}
-          <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
-            <div className="flex items-center gap-3">
-              {/* Selected style indicator */}
-              {selectedPreset && (
-                <span className="flex items-center gap-1.5 text-xs text-gray-500">
-                  <span
-                    className="w-3 h-3 rounded-sm"
-                    style={{ background: selectedPreset.colors?.bg_primary || selectedPreset.colors?.accent || '#666' }}
-                  />
-                  {selectedPreset.name}
-                </span>
-              )}
-              {!selectedPreset && (
-                <span className="text-xs text-amber-500">↓ 请选择风格</span>
-              )}
+          <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+            {/* Selected style indicator */}
+            {selectedPreset && (
+              <span className="flex items-center gap-1.5 text-xs text-gray-500">
+                <span
+                  className="w-3 h-3 rounded-sm"
+                  style={{ background: selectedPreset.colors?.bg_primary || selectedPreset.colors?.accent || '#666' }}
+                />
+                {selectedPreset.name}
+              </span>
+            )}
+            {!selectedPreset && (
+              <span className="text-xs text-amber-500">↓ 请选择风格</span>
+            )}
 
-              <span className="text-gray-200">|</span>
+            {/* Slide count */}
+            <select
+              value={slideCountPref}
+              onChange={(e) => setSlideCountPref(e.target.value)}
+              className="text-xs text-gray-600 border border-gray-200 rounded-lg px-2 py-1.5 hover:border-gray-300 transition-colors"
+            >
+              {SLIDE_COUNT_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
 
-              {/* Slide count */}
-              <select
-                value={slideCountPref}
-                onChange={(e) => setSlideCountPref(e.target.value)}
-                className="text-xs text-gray-600 border border-gray-200 rounded-lg px-2.5 py-1.5 hover:border-gray-300 transition-colors"
-              >
-                {SLIDE_COUNT_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
+            {/* Language */}
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value as "zh" | "en")}
+              className="text-xs text-gray-600 border border-gray-200 rounded-lg px-2 py-1.5 hover:border-gray-300 transition-colors"
+            >
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
 
-              <span className="text-gray-200">|</span>
+            {/* Aspect Ratio */}
+            <select
+              value={aspectRatio}
+              onChange={(e) => setAspectRatio(e.target.value)}
+              className="text-xs text-gray-600 border border-gray-200 rounded-lg px-2 py-1.5 hover:border-gray-300 transition-colors"
+            >
+              <option value="16:9">16:9 宽屏</option>
+              <option value="4:3">4:3 标准</option>
+              <option value="16:10">16:10</option>
+              <option value="1:1">1:1 方形</option>
+            </select>
 
-              {/* Language */}
-              <select
-                value={language}
-                onChange={(e) => setLanguage(e.target.value as "zh" | "en")}
-                className="text-xs text-gray-600 border border-gray-200 rounded-lg px-2.5 py-1.5 hover:border-gray-300 transition-colors"
-              >
-                <option value="zh">中文</option>
-                <option value="en">English</option>
-              </select>
+            {/* Content stats + estimated page count */}
+            {content.trim() && (
+              <span className="text-[11px] text-gray-400">
+                {content.length > 5000
+                  ? <span className="text-amber-500">{content.length.toLocaleString()}字 · 内容较长</span>
+                  : `${content.length.toLocaleString()}字`}
+                {" · ~"}{estimateSlideCount(content)} 页
+              </span>
+            )}
 
-              <span className="text-gray-200">|</span>
-
-              {/* Aspect Ratio */}
-              <select
-                value={aspectRatio}
-                onChange={(e) => setAspectRatio(e.target.value)}
-                className="text-xs text-gray-600 border border-gray-200 rounded-lg px-2.5 py-1.5 hover:border-gray-300 transition-colors"
-              >
-                <option value="16:9">16:9 宽屏</option>
-                <option value="4:3">4:3 标准</option>
-                <option value="16:10">16:10</option>
-                <option value="1:1">1:1 方形</option>
-              </select>
-
-              {/* Estimated page count */}
-              {content.trim() && (
-                <span className="text-[11px] text-gray-400">
-                  ~{estimateSlideCount(content)} 页
-                </span>
-              )}
-            </div>
+            {/* Spacer pushes button to end */}
+            <div className="flex-1" />
 
             <button
               onClick={handleGenerate}
               disabled={!content.trim() || !selectedStyle}
+              title={!content.trim() ? "请先输入内容" : !selectedStyle ? "请选择一个风格" : undefined}
               className="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               生成 →

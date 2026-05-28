@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from "react";
 import {
   SlideDTO,
+  LayoutInfo,
   regenerateSlide,
   exportPresentation,
   exportPdf,
@@ -38,12 +39,14 @@ interface GenerationContextValue {
   moveSlide: (fromIndex: number, toIndex: number) => void;
   deleteSlide: (index: number) => void;
   insertSlide: (afterIndex: number) => void;
+  duplicateSlide: (index: number) => void;
   previewFull: () => Promise<void>;
   doExport: () => Promise<void>;
   doExportPdf: () => Promise<void>;
   doExportPptx: () => Promise<void>;
   pdfExporting: boolean;
   layouts: string[];
+  layoutMap: Record<string, LayoutInfo>;
   undo: () => void;
   canUndo: boolean;
   loadSlides: (slides: SlideDTO[], style: string, title?: string) => void;
@@ -93,18 +96,23 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
   const doneListenersRef = useRef<Set<DoneListener>>(new Set());
   const genContentRef = useRef<string>("");
   const genStyleRef = useRef<string>("");
+  const slidesRef = useRef<SlideDTO[]>([]);
 
   const onDone = useCallback((listener: DoneListener) => {
     doneListenersRef.current.add(listener);
     return () => { doneListenersRef.current.delete(listener); };
   }, []);
 
+  useEffect(() => { slidesRef.current = state.slides; }, [state.slides]);
+
   // Undo stack
   const undoStackRef = useRef<SlideDTO[][]>([]);
+  const [undoCount, setUndoCount] = useState(0);
   const MAX_UNDO = 10;
 
   const pushUndo = useCallback((slides: SlideDTO[]) => {
     undoStackRef.current = [...undoStackRef.current.slice(-(MAX_UNDO - 1)), slides];
+    setUndoCount(undoStackRef.current.length);
   }, []);
 
   const undo = useCallback(() => {
@@ -112,10 +120,11 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     if (stack.length === 0) return;
     const prev = stack[stack.length - 1];
     undoStackRef.current = stack.slice(0, -1);
+    setUndoCount(undoStackRef.current.length);
     setState((s) => ({ ...s, slides: prev }));
   }, []);
 
-  const canUndo = undoStackRef.current.length > 0;
+  const canUndo = undoCount > 0;
 
   const generate = useCallback((content: string, style: string, language: string = "zh", aspectRatio: string = "16:9") => {
     abortControllerRef.current?.abort();
@@ -130,6 +139,7 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
       progress: { current: 0, total: 0 },
     });
     undoStackRef.current = [];
+    setUndoCount(0);
 
     const controller = streamGeneration(content, style, {
       onThinking: (text) => {
@@ -255,7 +265,7 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
         return { ...s, loading: true, error: null };
       });
       try {
-        const currentSlides = state.slides;
+        const currentSlides = slidesRef.current;
         const contextSlides: Record<string, unknown>[] = [];
         if (index > 0 && currentSlides[index - 1]?.html) {
           contextSlides.push({ index: index - 1, title: currentSlides[index - 1].title, html: currentSlides[index - 1].html });
@@ -289,7 +299,7 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
         setState((s) => ({ ...s, loading: false, error: message }));
       }
     },
-    [state.style, state.slides, pushUndo]
+    [state.style, state.title, pushUndo]
   );
 
   const setActiveSlide = useCallback((index: number) => {
@@ -346,25 +356,52 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     });
   }, [pushUndo]);
 
+  const duplicateSlide = useCallback((index: number) => {
+    setState((s) => {
+      if (index < 0 || index >= s.slides.length) return s;
+      pushUndo(s.slides);
+      const source = s.slides[index];
+      const copy: SlideDTO = { ...source, title: `${source.title} (副本)` };
+      const newSlides = [...s.slides];
+      newSlides.splice(index + 1, 0, copy);
+      const reindexed = newSlides.map((slide, i) => ({ ...slide, index: i }));
+      return { ...s, slides: reindexed, activeIndex: index + 1 };
+    });
+  }, [pushUndo]);
+
   const previewFull = useCallback(async () => {
-    const slides = state.slides.map((s) => ({ html: s.html }));
-    const result = await exportPresentation(slides, state.style, state.title);
-    const blob = new Blob([result.html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    try {
+      const slides = state.slides.map((s) => ({ html: s.html }));
+      const result = await exportPresentation(slides, state.style, state.title);
+      // Use sandbox iframe with Blob src to isolate LLM-generated HTML from parent origin
+      const contentBlob = new Blob([result.html], { type: "text/html" });
+      const contentUrl = URL.createObjectURL(contentBlob);
+      const wrapper = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview</title><style>*{margin:0;padding:0}iframe{width:100vw;height:100vh;border:none}</style></head><body><iframe sandbox="allow-scripts" src="${contentUrl}"></iframe></body></html>`;
+      const blob = new Blob([wrapper], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => { URL.revokeObjectURL(url); URL.revokeObjectURL(contentUrl); }, 60000);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "预览失败";
+      setState((s) => ({ ...s, error: message }));
+    }
   }, [state.slides, state.style, state.title]);
 
   const doExport = useCallback(async () => {
-    const slides = state.slides.map((s) => ({ html: s.html }));
-    const result = await exportPresentation(slides, state.style, state.title);
-    const blob = new Blob([result.html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = result.filename || `${state.title || "presentation"}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const slides = state.slides.map((s) => ({ html: s.html }));
+      const result = await exportPresentation(slides, state.style, state.title);
+      const blob = new Blob([result.html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.filename || `${state.title || "presentation"}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "导出失败";
+      setState((s) => ({ ...s, error: message }));
+    }
   }, [state.slides, state.style, state.title]);
 
   const [pdfExporting, setPdfExporting] = useState(false);
@@ -409,10 +446,11 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     }
   }, [state.slides, state.style, state.title]);
 
-  const [layouts, setLayouts] = useState<string[]>([]);
+  const [layoutMap, setLayoutMap] = useState<Record<string, LayoutInfo>>({});
+  const layouts = useMemo(() => Object.keys(layoutMap), [layoutMap]);
 
   useEffect(() => {
-    fetchLayouts().then((data) => setLayouts(Object.keys(data.layouts)));
+    fetchLayouts().then((data) => setLayoutMap(data.layouts));
   }, []);
 
   const recoverActiveGeneration = useCallback(async (): Promise<boolean> => {
@@ -455,8 +493,9 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
 
   const continueGeneration = useCallback(async (indices: number[]) => {
     if (indices.length === 0) return;
-    const total = state.slides.length;
-    const completedBefore = state.slides.filter(s => s.html && s.html !== "__FAILED__").length;
+    const currentSlides = slidesRef.current;
+    const total = currentSlides.length;
+    const completedBefore = currentSlides.filter(s => s.html && s.html !== "__FAILED__").length;
 
     setState((s) => ({
       ...s,
@@ -482,8 +521,8 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
           },
         }));
 
-        const currentSlides = state.slides;
-        await Promise.all(
+        const currentSlides = slidesRef.current;
+        const results = await Promise.allSettled(
           batch.map(async (idx) => {
             const slide = currentSlides[idx];
             const content = slide.detailed_content || slide.bullets?.join("\n") || slide.title;
@@ -514,8 +553,22 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
                 progress: { current: completed, total, batchStart: s.progress?.batchStart, batchEnd: s.progress?.batchEnd },
               };
             });
+            return idx;
           })
         );
+
+        // Mark failed slides so user can retry them individually
+        for (let j = 0; j < results.length; j++) {
+          if (results[j].status === "rejected") {
+            const failedIdx = batch[j];
+            setState((s) => {
+              const newSlides = [...s.slides];
+              newSlides[failedIdx] = { ...newSlides[failedIdx], html: "__FAILED__" };
+              return { ...s, slides: newSlides };
+            });
+            completed++;
+          }
+        }
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "继续生成失败";
@@ -536,36 +589,38 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
         return { ...s, generating: false, loading: false, progress: null };
       });
     }
-  }, [state.slides, state.style, genId]);
+  }, [state.style, genId]);
+
+  const contextValue = useMemo(() => ({
+    state,
+    genId,
+    generate,
+    cancel,
+    regenSlide,
+    setActiveSlide,
+    updateSlideHtml,
+    moveSlide,
+    deleteSlide,
+    insertSlide,
+    duplicateSlide,
+    previewFull,
+    doExport,
+    doExportPdf,
+    doExportPptx,
+    pdfExporting,
+    layouts,
+    layoutMap,
+    undo,
+    canUndo,
+    loadSlides,
+    setTitle,
+    onDone,
+    recoverActiveGeneration,
+    continueGeneration,
+  }), [state, genId, generate, cancel, regenSlide, setActiveSlide, updateSlideHtml, moveSlide, deleteSlide, insertSlide, duplicateSlide, previewFull, doExport, doExportPdf, doExportPptx, pdfExporting, layouts, layoutMap, undo, canUndo, loadSlides, setTitle, onDone, recoverActiveGeneration, continueGeneration]);
 
   return (
-    <GenerationContext.Provider
-      value={{
-        state,
-        genId,
-        generate,
-        cancel,
-        regenSlide,
-        setActiveSlide,
-        updateSlideHtml,
-        moveSlide,
-        deleteSlide,
-        insertSlide,
-        previewFull,
-        doExport,
-        doExportPdf,
-        doExportPptx,
-        pdfExporting,
-        layouts,
-        undo,
-        canUndo,
-        loadSlides,
-        setTitle,
-        onDone,
-        recoverActiveGeneration,
-        continueGeneration,
-      }}
-    >
+    <GenerationContext.Provider value={contextValue}>
       {children}
     </GenerationContext.Provider>
   );

@@ -1,14 +1,26 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { SlideDTO } from "@/lib/api";
+import { useState, useEffect, useRef } from "react";
+import { SlideDTO, LayoutInfo } from "@/lib/api";
+
+function buildContent(s: SlideDTO): string {
+  const parts = [s.title];
+  if (s.detailed_content) {
+    parts.push("", s.detailed_content);
+  } else if (s.bullets && s.bullets.length > 0) {
+    parts.push("", ...s.bullets.map((b) => `- ${b}`));
+  }
+  return parts.join("\n");
+}
 
 interface Props {
   slide: SlideDTO;
   slideIndex: number;
   totalSlides: number;
   layouts: string[];
+  layoutMap?: Record<string, LayoutInfo>;
   onRegenerate: (content: string, layout: string, prompt: string) => void;
+  onDirtyChange?: (dirty: boolean) => void;
   loading: boolean;
   generating?: boolean;
 }
@@ -18,29 +30,39 @@ export default function ContentEditor({
   slideIndex,
   totalSlides,
   layouts,
+  layoutMap = {},
   onRegenerate,
+  onDirtyChange,
   loading,
   generating = false,
 }: Props) {
-  const buildContent = (s: SlideDTO) => {
-    const parts = [s.title];
-    if (s.detailed_content) {
-      parts.push("", s.detailed_content);
-    } else if (s.bullets && s.bullets.length > 0) {
-      parts.push("", ...s.bullets.map((b) => `- ${b}`));
-    }
-    return parts.join("\n");
-  };
 
   const [content, setContent] = useState(buildContent(slide));
   const [prompt, setPrompt] = useState("");
   const [layout, setLayout] = useState("auto");
+  const [userEdited, setUserEdited] = useState(false);
+  const prevDirty = useRef(false);
+
+  useEffect(() => {
+    if (prevDirty.current !== userEdited) {
+      prevDirty.current = userEdited;
+      onDirtyChange?.(userEdited);
+    }
+  }, [userEdited, onDirtyChange]);
 
   useEffect(() => {
     setContent(buildContent(slide));
     setLayout("auto");
     setPrompt("");
-  }, [slide.index, slide.detailed_content]);
+    setUserEdited(false);
+  }, [slide.index]);
+
+  // Update content when detailed_content arrives, but only if user hasn't edited
+  useEffect(() => {
+    if (!userEdited && slide.detailed_content) {
+      setContent(buildContent(slide));
+    }
+  }, [slide.detailed_content]);
 
   const roleLabel = slideIndex === 0 ? "封面" : slideIndex === totalSlides - 1 ? "结尾" : "内容";
 
@@ -72,7 +94,7 @@ export default function ContentEditor({
           <label className="text-xs font-semibold text-gray-600 mb-1.5 block">页面内容</label>
           <textarea
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(e) => { setContent(e.target.value); setUserEdited(true); }}
             className="w-full h-[160px] p-3 border border-gray-200 rounded-md text-sm font-mono resize-y focus:ring-1 focus:ring-blue-400 bg-gray-50 leading-relaxed"
             placeholder="第一行为标题，后续行为要点内容（每行一个要点，可用 - 开头）"
           />
@@ -98,7 +120,7 @@ export default function ContentEditor({
           >
             <option value="auto">布局: 自动</option>
             {layouts.map((l) => (
-              <option key={l} value={l}>{l}</option>
+              <option key={l} value={l}>{layoutMap[l]?.description || l}</option>
             ))}
           </select>
           <button

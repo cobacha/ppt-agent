@@ -49,10 +49,12 @@ export default function SlideList({ slides, activeIndex, onSelect, onReorder, ge
                 e.preventDefault();
                 setDragOverIndex(i);
               }}
-              onDragEnd={() => {
+              onDrop={() => {
                 if (dragIndex !== null && dragOverIndex !== null && dragIndex !== dragOverIndex) {
                   onReorder?.(dragIndex, dragOverIndex);
                 }
+              }}
+              onDragEnd={() => {
                 setDragIndex(null);
                 setDragOverIndex(null);
               }}

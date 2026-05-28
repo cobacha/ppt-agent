@@ -139,17 +139,27 @@ export default function GeneratingView({ thinking, onCancel }: Props) {
           </div>
         )}
 
-        {/* Cancel */}
-        {onCancel && (
-          <div className="flex justify-center mt-10">
+        {/* Time estimate + Cancel */}
+        <div className="flex flex-col items-center gap-3 mt-10">
+          {elapsed > 5 && titles.length === 0 && (
+            <p className="text-[11px] text-gray-300">
+              通常需要 15-30 秒完成构思
+            </p>
+          )}
+          {titles.length > 0 && (
+            <p className="text-[11px] text-gray-300">
+              即将开始逐页生成，每页约 5-8 秒
+            </p>
+          )}
+          {onCancel && (
             <button
               onClick={onCancel}
               className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
             >
               取消生成
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <style>{`

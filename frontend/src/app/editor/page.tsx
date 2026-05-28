@@ -33,12 +33,14 @@ function EditorPage() {
     moveSlide,
     deleteSlide,
     insertSlide,
+    duplicateSlide,
     previewFull,
     doExport,
     doExportPdf,
     doExportPptx,
     pdfExporting,
     layouts,
+    layoutMap,
     undo,
     canUndo,
     loadSlides,
@@ -160,6 +162,15 @@ function EditorPage() {
     continueGeneration(emptyIndices);
   };
 
+  const activeSlide = state.slides[state.activeIndex];
+  const dirtyRef = useRef(false);
+
+  const guardedSetActiveSlide = useCallback((index: number) => {
+    if (dirtyRef.current && !confirm("当前页面内容已修改但未重新生成，确定切换吗？")) return;
+    dirtyRef.current = false;
+    setActiveSlide(index);
+  }, [setActiveSlide]);
+
   // Keyboard navigation
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -170,29 +181,27 @@ function EditorPage() {
         target.tagName === "SELECT" ||
         target.isContentEditable;
 
-      // Ctrl+Z / Cmd+Z for undo (works even in inputs)
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         undo();
         return;
       }
 
-      // Skip other shortcuts if focused on input
       if (isInput) return;
 
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         if (state.activeIndex > 0) {
-          setActiveSlide(state.activeIndex - 1);
+          guardedSetActiveSlide(state.activeIndex - 1);
         }
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
         if (state.activeIndex < state.slides.length - 1) {
-          setActiveSlide(state.activeIndex + 1);
+          guardedSetActiveSlide(state.activeIndex + 1);
         }
       }
     },
-    [state.activeIndex, state.slides.length, setActiveSlide, undo]
+    [state.activeIndex, state.slides.length, guardedSetActiveSlide, undo]
   );
 
   useEffect(() => {
@@ -200,7 +209,9 @@ function EditorPage() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  const activeSlide = state.slides[state.activeIndex];
+  const handleContentEdit = useCallback((updated: string) => {
+    updateSlideHtml(state.activeIndex, updated);
+  }, [state.activeIndex, updateSlideHtml]);
 
 
   if (state.error && state.slides.length === 0) {
@@ -269,6 +280,7 @@ function EditorPage() {
           }
         }}
         onInsert={() => insertSlide(state.activeIndex)}
+        onDuplicate={() => duplicateSlide(state.activeIndex)}
         loading={state.loading}
         generating={state.generating}
         onUndo={undo}
@@ -320,7 +332,7 @@ function EditorPage() {
           <SlideList
             slides={state.slides}
             activeIndex={state.activeIndex}
-            onSelect={setActiveSlide}
+            onSelect={guardedSetActiveSlide}
             onReorder={moveSlide}
             generating={state.generating}
             regeneratingIndex={state.loading && !state.generating ? state.activeIndex : null}
@@ -333,9 +345,12 @@ function EditorPage() {
               slideIndex={state.activeIndex}
               totalSlides={state.slides.length}
               layouts={layouts}
-              onRegenerate={(content, layout, prompt) =>
-                regenSlide(state.activeIndex, content, layout, prompt)
-              }
+              layoutMap={layoutMap}
+              onRegenerate={(content, layout, prompt) => {
+                dirtyRef.current = false;
+                regenSlide(state.activeIndex, content, layout, prompt);
+              }}
+              onDirtyChange={(dirty) => { dirtyRef.current = dirty; }}
               loading={state.loading}
               generating={state.generating}
             />
@@ -348,9 +363,7 @@ function EditorPage() {
             {activeSlide && activeSlide.html && activeSlide.html !== "__FAILED__" ? (
               <SlidePreview
                 html={activeSlide.html}
-                onContentEdit={(updated) =>
-                  updateSlideHtml(state.activeIndex, updated)
-                }
+                onContentEdit={handleContentEdit}
                 loading={state.loading}
               />
             ) : activeSlide ? (

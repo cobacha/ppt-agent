@@ -64,11 +64,14 @@ class QualityGate:
         issues = []
         warnings = []
 
-        # Overflow check — specifically on the <section> tag
+        # Overflow check — check inline style on <section> and <style> blocks
         section_tag = re.search(r'<section[^>]*>', html)
         if section_tag:
-            section_attrs = section_tag.group(0)
-            if 'overflow' not in section_attrs:
+            has_overflow = 'overflow' in section_tag.group(0)
+            if not has_overflow:
+                style_blocks = re.findall(r'<style[^>]*>(.*?)</style>', html, re.DOTALL)
+                has_overflow = any('overflow' in block and 'hidden' in block for block in style_blocks)
+            if not has_overflow:
                 issues.append("Slide section missing overflow: hidden")
         else:
             issues.append("No <section> element found")

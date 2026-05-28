@@ -1,6 +1,6 @@
 import { OutlineResponse } from "./api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
 export interface SSESlideEvent {
   index: number;
@@ -60,6 +60,7 @@ export function streamGeneration(
   aspectRatio: string = "16:9"
 ): AbortController {
   const controller = new AbortController();
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
   (async () => {
     let retryCount = 0;
@@ -70,7 +71,7 @@ export function streamGeneration(
         const res = await fetch(`${API_BASE}/api/generate-stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, style, language, aspect_ratio: aspectRatio }),
+          body: JSON.stringify({ content, style, language, aspect_ratio: aspectRatio, request_id: requestId }),
           signal: controller.signal,
         });
 
@@ -94,6 +95,8 @@ export function streamGeneration(
 
         const decoder = new TextDecoder();
         let buffer = "";
+        let currentEvent = "";
+        let currentData = "";
 
         while (true) {
           const { done, value } = await reader.read();
@@ -101,31 +104,25 @@ export function streamGeneration(
 
           buffer += decoder.decode(value, { stream: true });
 
-          // Parse SSE events from buffer
-          const lines = buffer.split("\n");
-          buffer = "";
-
-          let currentEvent = "";
-          let currentData = "";
-
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-
-            // If this is the last line and doesn't end with \n, keep it in buffer
-            if (i === lines.length - 1 && !buffer.endsWith("\n") && line !== "") {
-              buffer = line;
-              break;
-            }
+          // Process complete lines from buffer
+          let newlineIdx: number;
+          while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+            const line = buffer.slice(0, newlineIdx);
+            buffer = buffer.slice(newlineIdx + 1);
 
             if (line.startsWith("event: ")) {
               currentEvent = line.slice(7).trim();
             } else if (line.startsWith("data: ")) {
-              currentData = line.slice(6);
+              // SSE spec: multi-line data fields are concatenated with newlines
+              currentData = currentData ? currentData + "\n" + line.slice(6) : line.slice(6);
             } else if (line === "" && currentEvent) {
-              // Empty line = end of event
+              const eventType = currentEvent;
+              const eventData = currentData;
+              currentEvent = "";
+              currentData = "";
               try {
-                const data = JSON.parse(currentData);
-                switch (currentEvent) {
+                const data = JSON.parse(eventData);
+                switch (eventType) {
                   case "thinking":
                     callbacks.onThinking?.(data.text);
                     break;
@@ -152,13 +149,11 @@ export function streamGeneration(
                     break;
                   case "done":
                     callbacks.onDone(data as { gen_id?: string });
-                    return; // Successful completion, exit entirely
+                    return;
                 }
               } catch {
                 // Ignore JSON parse errors for partial data
               }
-              currentEvent = "";
-              currentData = "";
             }
           }
         }

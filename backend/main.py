@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import asyncio
+import html as html_mod
 import json
 import logging
 import os
@@ -28,6 +29,7 @@ from agent.loop import PPTAgent, SlideResult
 from db import (
     init_db, save_generation, list_generations, get_generation, delete_generation,
     create_generation, update_generation_slides, complete_generation, get_active_generation,
+    cleanup_stale_generations,
 )
 
 # --- Logging ---
@@ -87,19 +89,49 @@ class RateLimiter:
 rate_limiter = RateLimiter(max_requests=5, window_seconds=60)
 
 # Generation endpoints that should be rate-limited
-RATE_LIMITED_PATHS = {"/api/generate", "/api/generate-slide", "/api/generate-slides-batch", "/api/generate-stream", "/api/outline", "/api/regen"}
+RATE_LIMITED_PATHS = {"/api/generate", "/api/generate-slide", "/api/generate-slides-batch", "/api/generate-stream", "/api/outline", "/api/regen", "/api/import-url"}
+
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+LOCALHOST_IPS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _check_admin(request: Request):
+    """Verify admin access. When ADMIN_TOKEN is set, always require it (proxy-safe).
+    When no token configured, fall back to localhost IP check (dev mode)."""
+    token = request.headers.get("X-Admin-Token", "")
+    if ADMIN_TOKEN:
+        if token == ADMIN_TOKEN:
+            return
+        raise HTTPException(403, "Admin access required")
+    # No token configured — only allow from localhost (dev mode)
+    client_ip = request.client.host if request.client else ""
+    if client_ip in LOCALHOST_IPS:
+        return
+    raise HTTPException(403, "Admin access required")
 
 
 # --- Lifespan ---
+async def _periodic_rate_limiter_cleanup():
+    """Purge stale IPs every 5 minutes to prevent unbounded memory growth."""
+    import asyncio
+    while True:
+        await asyncio.sleep(300)
+        rate_limiter.cleanup()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _agent
     init_db()
+    cleanup_stale_generations()
     logger.info("Initializing PPTAgent singleton...")
     _agent = PPTAgent()
     logger.info("PPTAgent ready.")
+    import asyncio
+    cleanup_task = asyncio.create_task(_periodic_rate_limiter_cleanup())
     yield
-    executor.shutdown(wait=False)
+    cleanup_task.cancel()
+    executor.shutdown(wait=True, cancel_futures=True)
     logger.info("Shutdown complete.")
 
 
@@ -138,6 +170,7 @@ async def rate_limit_middleware(request: Request, call_next):
         client_ip = request.client.host if request.client else "unknown"
         if not rate_limiter.is_allowed(client_ip):
             from fastapi.responses import JSONResponse
+            rate_limiter.cleanup()
             return JSONResponse(
                 status_code=429,
                 content={"detail": "请求过于频繁，请稍后再试"},
@@ -263,11 +296,17 @@ def _safe_filename(title: str, ext: str) -> str:
 @app.get("/api/health")
 async def health():
     """Health check for monitoring and Docker healthcheck."""
+    db_ok = False
+    try:
+        db_ok = get_generation("__healthcheck__") is None or True
+    except Exception:
+        pass
     return {
-        "status": "ok",
+        "status": "ok" if db_ok else "degraded",
         "model": os.environ.get("MODEL_ID", "claude-sonnet-4-6"),
         "version": "1.0.0",
         "api_key_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "db": "ok" if db_ok else "error",
     }
 
 
@@ -278,16 +317,48 @@ class ImportURLRequest(BaseModel):
 @app.post("/api/import-url")
 async def import_url(req: ImportURLRequest):
     """Fetch a URL and extract text content for slide generation."""
+    import ipaddress
+    import socket
     import httpx
+    from urllib.parse import urlparse
     from bs4 import BeautifulSoup
 
     url = req.url.strip()
     if not url.startswith(("http://", "https://")):
         raise HTTPException(status_code=422, detail="仅支持 http/https 链接")
 
+    # SSRF protection: resolve hostname, reject private IPs, pin resolved address
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=422, detail="无效的链接地址")
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
-            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 PPTAgent/1.0"})
+        resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        safe_ip = None
+        for family, _, _, _, sockaddr in resolved:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if hasattr(ip, 'ipv4_mapped') and ip.ipv4_mapped:
+                ip = ip.ipv4_mapped
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+                raise HTTPException(status_code=422, detail="不允许访问内网地址")
+            if safe_ip is None:
+                safe_ip = str(ip)
+        if not safe_ip:
+            raise HTTPException(status_code=422, detail="无法解析该域名")
+    except socket.gaierror:
+        raise HTTPException(status_code=422, detail="无法解析该域名")
+
+    # Pin the resolved IP to prevent DNS rebinding
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    pinned_url = f"{parsed.scheme}://{safe_ip}:{port}{parsed.path}"
+    if parsed.query:
+        pinned_url += f"?{parsed.query}"
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=15.0) as client:
+            resp = await client.get(pinned_url, headers={"User-Agent": "Mozilla/5.0 PPTAgent/1.0", "Host": hostname})
+            if resp.is_redirect:
+                raise HTTPException(status_code=422, detail="链接发生了重定向，请使用最终地址")
             resp.raise_for_status()
     except httpx.TimeoutException:
         raise HTTPException(status_code=422, detail="请求超时，请检查链接是否可访问")
@@ -494,6 +565,14 @@ class StreamRequest(BaseModel):
     style: str = "corporate-navy"
     language: str = "zh"
     aspect_ratio: str = "16:9"
+    request_id: str | None = None
+
+
+# Track recent request_ids to prevent duplicate generation on SSE retry (TTL 10 min, max 200)
+_recent_request_ids: dict[str, tuple[str, float]] = {}  # request_id -> (gen_id, timestamp)
+
+# Concurrency gate: limit simultaneous SSE generations
+_generation_semaphore = asyncio.Semaphore(3)
 
 
 @app.post("/api/generate-stream")
@@ -503,7 +582,25 @@ async def generate_stream(req: StreamRequest, request: Request):
     if error:
         raise HTTPException(status_code=422, detail=error)
 
+    # Dedup: if client retries with same request_id, redirect to existing generation
+    if req.request_id and req.request_id in _recent_request_ids:
+        existing_gen_id, _ts = _recent_request_ids[req.request_id]
+        existing = get_generation(existing_gen_id)
+        if existing and existing.get("status") in ("generating", "completed"):
+            async def resume_generator():
+                yield f"event: resume\ndata: {json.dumps({'gen_id': existing_gen_id, 'status': existing.get('status')})}\n\n"
+                yield f"event: done\ndata: {json.dumps({'gen_id': existing_gen_id})}\n\n"
+            return StreamingResponse(resume_generator(), media_type="text/event-stream")
+
     async def event_generator():
+        try:
+            await asyncio.wait_for(_generation_semaphore.acquire(), timeout=2.0)
+        except asyncio.TimeoutError:
+            yield f"event: error\ndata: {json.dumps({'message': '服务繁忙，请稍后重试'})}\n\n"
+            yield f"event: done\ndata: {json.dumps({})}\n\n"
+            return
+        gen_id = None
+        generation_completed = False
         try:
             agent = get_agent()
 
@@ -511,30 +608,24 @@ async def generate_stream(req: StreamRequest, request: Request):
             loop = asyncio.get_event_loop()
             outline = None
             try:
-                # Run streaming outline in thread (synchronous generator)
-                def run_streaming_outline():
-                    buffer = ""
-                    chunks = []
-                    for chunk in agent.generate_outline_streaming(req.content, language=req.language):
-                        buffer += chunk
-                        if len(buffer) >= 20:
-                            chunks.append(buffer)
-                            buffer = ""
-                    if buffer:
-                        chunks.append(buffer)
-                    return chunks
-
                 # We need to yield thinking events as they come, so use a queue
                 think_queue: queue.Queue[str | None] = queue.Queue()
+
+                streaming_outline_result: list = []  # mutable container for thread result
 
                 def run_streaming_with_queue():
                     try:
                         buffer = ""
-                        for chunk in agent.generate_outline_streaming(req.content, language=req.language):
-                            buffer += chunk
-                            if len(buffer) >= 20:
-                                think_queue.put(buffer)
-                                buffer = ""
+                        gen = agent.analyzer.analyze_streaming(req.content, language=req.language)
+                        try:
+                            while True:
+                                chunk = next(gen)
+                                buffer += chunk
+                                if len(buffer) >= 20:
+                                    think_queue.put(buffer)
+                                    buffer = ""
+                        except StopIteration as stop:
+                            streaming_outline_result.append(stop.value)
                         if buffer:
                             think_queue.put(buffer)
                     except Exception as e:
@@ -566,7 +657,7 @@ async def generate_stream(req: StreamRequest, request: Request):
 
                 # Wait for the future to complete (handles exceptions)
                 await future
-                outline = agent.get_last_outline()
+                outline = streaming_outline_result[0] if streaming_outline_result else agent.get_last_outline()
             except Exception as e:
                 # Fallback to non-streaming outline (retry up to 2 times)
                 logger.warning(f"Streaming outline failed, falling back: {e}")
@@ -604,6 +695,19 @@ async def generate_stream(req: StreamRequest, request: Request):
                 content=req.content, style=req.style,
                 title=gen_title, slides=initial_slides, status="generating",
             )
+            if req.request_id:
+                now = time.time()
+                _recent_request_ids[req.request_id] = (gen_id, now)
+                # Evict expired entries (>10 min) and cap at 200
+                if len(_recent_request_ids) > 200:
+                    cutoff = now - 600
+                    expired = [k for k, (_, ts) in _recent_request_ids.items() if ts <= cutoff]
+                    for k in expired:
+                        _recent_request_ids.pop(k, None)
+                    if len(_recent_request_ids) > 200:
+                        oldest = sorted(_recent_request_ids.items(), key=lambda x: x[1][1])[:100]
+                        for k, _ in oldest:
+                            _recent_request_ids.pop(k, None)
             # Track slides for DB updates
             db_slides = list(initial_slides)
 
@@ -686,7 +790,8 @@ async def generate_stream(req: StreamRequest, request: Request):
                     if isinstance(result, Exception):
                         failed_idx = batch_start + i
                         failed_slides.append((failed_idx, batch_specs[i]))
-                        yield f"event: error\ndata: {json.dumps({'message': f'第 {failed_idx+1} 页生成失败: {result}'}, ensure_ascii=False)}\n\n"
+                        logger.error(f"Slide {failed_idx+1} generation failed: {result}")
+                        yield f"event: error\ndata: {json.dumps({'message': f'第 {failed_idx+1} 页生成失败，将自动重试'}, ensure_ascii=False)}\n\n"
                     else:
                         yield f"event: slide\ndata: {json.dumps(result, ensure_ascii=False)}\n\n"
                         context_slides.append({
@@ -742,10 +847,11 @@ async def generate_stream(req: StreamRequest, request: Request):
                             update_generation_slides(gen_id, db_slides, gen_title)
                     except Exception as retry_err:
                         logger.warning(f"Retry also failed for slide {failed_idx}: {retry_err}")
+                        safe_title = html_mod.escape(slide_title)
                         fallback_html = f'''<section class="slide" style="height:100vh;height:100dvh;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f8f9fa;">
   <div style="text-align:center;padding:2rem;">
     <h2 style="font-size:clamp(1.2rem,2.5vw,2rem);color:#6b7280;">⚠️ 生成失败</h2>
-    <p style="font-size:clamp(0.9rem,1.5vw,1.1rem);color:#9ca3af;margin-top:1rem;">{slide_title}</p>
+    <p style="font-size:clamp(0.9rem,1.5vw,1.1rem);color:#9ca3af;margin-top:1rem;">{safe_title}</p>
     <p style="font-size:clamp(0.8rem,1.2vw,0.9rem);color:#d1d5db;margin-top:0.5rem;">请点击重新生成此页</p>
   </div>
 </section>'''
@@ -759,14 +865,21 @@ async def generate_stream(req: StreamRequest, request: Request):
                             update_generation_slides(gen_id, db_slides, gen_title)
 
             complete_generation(gen_id, "completed")
+            generation_completed = True
             yield f"event: done\ndata: {json.dumps({'gen_id': gen_id})}\n\n"
 
         except Exception as e:
             logger.exception("SSE generation error")
-            if 'gen_id' in locals():
+            if gen_id:
                 complete_generation(gen_id, "failed")
-            yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
-            yield f"event: done\ndata: {json.dumps({'gen_id': gen_id} if 'gen_id' in locals() else {})}\n\n"
+                generation_completed = True
+            yield f"event: error\ndata: {json.dumps({'message': '生成过程出错，请重试'}, ensure_ascii=False)}\n\n"
+            yield f"event: done\ndata: {json.dumps({'gen_id': gen_id} if gen_id else {})}\n\n"
+        finally:
+            _generation_semaphore.release()
+            if gen_id and not generation_completed:
+                logger.warning(f"SSE stream ended without completion (client disconnect?), marking {gen_id} as failed")
+                complete_generation(gen_id, "failed")
 
     return StreamingResponse(
         event_generator(),
@@ -861,7 +974,7 @@ async def export_html(req: ExportRequest):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{req.title or 'Generated Presentation'}</title>
+<title>{html_mod.escape(req.title) if req.title else 'Generated Presentation'}</title>
 {font_import}
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -1058,7 +1171,11 @@ async def get_prompt(filename: str):
     """Get a single prompt file content."""
     if not filename.endswith(".md"):
         raise HTTPException(400, "Filename must end with .md")
-    path = PROMPTS_DIR / filename
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(400, "Invalid filename")
+    path = (PROMPTS_DIR / filename).resolve()
+    if not path.is_relative_to(PROMPTS_DIR.resolve()):
+        raise HTTPException(400, "Invalid filename")
     if not path.exists():
         raise HTTPException(404, f"Prompt file not found: {filename}")
     stem = path.stem
@@ -1071,11 +1188,16 @@ async def get_prompt(filename: str):
 
 
 @app.put("/api/prompts/{filename}")
-async def update_prompt(filename: str, req: PromptUpdateRequest):
-    """Update an existing prompt file."""
+async def update_prompt(filename: str, req: PromptUpdateRequest, request: Request):
+    """Update an existing prompt file (admin-only)."""
+    _check_admin(request)
     if not filename.endswith(".md"):
         raise HTTPException(400, "Filename must end with .md")
-    path = PROMPTS_DIR / filename
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(400, "Invalid filename")
+    path = (PROMPTS_DIR / filename).resolve()
+    if not path.is_relative_to(PROMPTS_DIR.resolve()):
+        raise HTTPException(400, "Invalid filename")
     if not path.exists():
         raise HTTPException(404, f"Prompt file not found: {filename}")
     if not req.content.strip():
@@ -1122,12 +1244,33 @@ def _read_env_file() -> dict[str, str]:
 
 
 def _write_env_file(data: dict[str, str]):
-    """Write dict back to backend/.env, preserving comments from original."""
+    """Update backend/.env preserving comments, order, and unrecognized keys."""
     env_path = Path(__file__).parent / ".env"
-    lines = []
+    updated_keys: set[str] = set()
+    output_lines: list[str] = []
+
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                output_lines.append(line)
+                continue
+            if "=" in stripped:
+                k = stripped.split("=", 1)[0].strip()
+                if k in data:
+                    output_lines.append(f"{k}={data[k]}")
+                    updated_keys.add(k)
+                else:
+                    output_lines.append(line)
+            else:
+                output_lines.append(line)
+
+    # Append any new keys not already in the file
     for k, v in data.items():
-        lines.append(f"{k}={v}")
-    env_path.write_text("\n".join(lines) + "\n")
+        if k not in updated_keys:
+            output_lines.append(f"{k}={v}")
+
+    env_path.write_text("\n".join(output_lines) + "\n")
 
 
 @app.get("/api/settings")
@@ -1161,8 +1304,9 @@ async def get_settings():
 
 
 @app.put("/api/settings")
-async def update_settings(req: SettingsUpdateRequest):
-    """Update LLM settings: write .env, update os.environ, reload agent client."""
+async def update_settings(req: SettingsUpdateRequest, request: Request):
+    """Update LLM settings (admin-only): write .env, update os.environ, reload agent client."""
+    _check_admin(request)
     env_data = _read_env_file()
 
     if req.provider is not None:
@@ -1315,7 +1459,8 @@ async def export_pptx(req: ExportRequest):
     try:
         pptx_bytes = await html_to_pptx(full_html, aspect_ratio)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PPTX generation failed: {str(e)}")
+        logger.error(f"PPTX generation failed: {e}")
+        raise HTTPException(status_code=500, detail="PPTX 导出失败，请稍后重试")
 
     return Response(
         content=pptx_bytes,
@@ -1326,7 +1471,11 @@ async def export_pptx(req: ExportRequest):
 
 @app.get("/preview/{filename}", response_class=HTMLResponse)
 async def preview_file(filename: str):
-    path = OUTPUT_DIR / filename
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(400, "Invalid filename")
+    path = (OUTPUT_DIR / filename).resolve()
+    if not path.is_relative_to(OUTPUT_DIR.resolve()):
+        raise HTTPException(400, "Invalid filename")
     if not path.exists():
         raise HTTPException(404)
     return path.read_text(encoding="utf-8")

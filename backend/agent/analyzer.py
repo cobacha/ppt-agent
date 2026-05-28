@@ -175,8 +175,12 @@ class ContentAnalyzer:
 
         return self._parse_outline(response.text)
 
-    def analyze_streaming(self, content: str, language: str = "zh") -> Generator[str, None, None]:
-        """Generate outline with streaming, yielding text chunks as they arrive."""
+    def analyze_streaming(self, content: str, language: str = "zh") -> Generator[str, None, SlideOutline]:
+        """Generate outline with streaming, yielding text chunks as they arrive.
+
+        The parsed SlideOutline is available as the generator's return value
+        (via StopIteration.value) after iteration completes.
+        """
         full_text = ""
         for chunk in self.client.stream_completion(
             system=self._system_prompt + "\n\nCRITICAL: Return ONLY valid JSON. No trailing commas. All keys and string values MUST use double quotes. No comments. No explanation.",
@@ -187,5 +191,7 @@ class ContentAnalyzer:
             full_text += chunk
             yield chunk
 
-        # After streaming completes, parse the full result
-        self._last_streaming_result = self._parse_outline(full_text)
+        # Parse and return as generator return value (accessible via StopIteration.value)
+        result = self._parse_outline(full_text)
+        self._last_streaming_result = result  # Keep for backward compat
+        return result

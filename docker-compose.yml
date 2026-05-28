@@ -1,6 +1,7 @@
 services:
   backend:
     build: ./backend
+    restart: unless-stopped
     ports:
       - "8001:8001"
     env_file:
@@ -9,6 +10,7 @@ services:
       - CORS_ORIGINS=http://localhost:8877
     volumes:
       - ./output:/app/output
+      - ./data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/api/health"]
       interval: 30s
@@ -18,9 +20,17 @@ services:
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     ports:
       - "8877:8877"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8001
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8877"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

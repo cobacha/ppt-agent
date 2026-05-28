@@ -10,4 +10,5 @@ RUN npm run build
 
 EXPOSE 8877
 
-CMD ["npm", "start", "--", "--port", "8877"]
+ENV PORT=8877
+CMD ["npx", "next", "start", "--port", "8877"]

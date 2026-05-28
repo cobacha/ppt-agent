@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
 export interface SlideDTO {
   index: number;
@@ -33,11 +33,13 @@ export interface LayoutInfo {
 
 export async function fetchStyles(): Promise<{ presets: StylePreset[] }> {
   const res = await fetch(`${API_BASE}/api/styles`);
+  if (!res.ok) throw new Error(`Failed to fetch styles: ${res.statusText}`);
   return res.json();
 }
 
 export async function fetchLayouts(): Promise<{ layouts: Record<string, LayoutInfo> }> {
   const res = await fetch(`${API_BASE}/api/layouts`);
+  if (!res.ok) throw new Error(`Failed to fetch layouts: ${res.statusText}`);
   return res.json();
 }
 
@@ -146,6 +148,7 @@ export async function exportPresentation(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ slides, style, title }),
   });
+  if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
   return res.json();
 }
 

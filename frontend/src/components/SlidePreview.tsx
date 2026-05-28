@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useCallback, useState, memo } from "react";
 
 interface Props {
   html: string;
@@ -8,7 +8,7 @@ interface Props {
   loading?: boolean;
 }
 
-export default function SlidePreview({ html, onContentEdit, loading = false }: Props) {
+function SlidePreview({ html, onContentEdit, loading = false }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -17,6 +17,8 @@ export default function SlidePreview({ html, onContentEdit, loading = false }: P
   const [transitioning, setTransitioning] = useState(false);
   const prevHtmlRef = useRef<string>("");
   const observerRef = useRef<MutationObserver | null>(null);
+  const onContentEditRef = useRef(onContentEdit);
+  onContentEditRef.current = onContentEdit;
 
   const toggleFullscreen = useCallback(() => {
     const container = containerRef.current;
@@ -55,13 +57,13 @@ export default function SlidePreview({ html, onContentEdit, loading = false }: P
 
   const handleSaveEdit = useCallback(() => {
     const iframe = iframeRef.current;
-    if (!iframe || !onContentEdit) return;
+    if (!iframe || !onContentEditRef.current) return;
     const doc = iframe.contentDocument;
     if (!doc) return;
     const updated = doc.body.innerHTML;
-    onContentEdit(updated);
+    onContentEditRef.current(updated);
     setIsDirty(false);
-  }, [onContentEdit]);
+  }, []);
 
   const injectHtml = useCallback(() => {
     const iframe = iframeRef.current;
@@ -93,7 +95,7 @@ export default function SlidePreview({ html, onContentEdit, loading = false }: P
     `);
     doc.close();
 
-    if (onContentEdit) {
+    if (onContentEditRef.current) {
       const setupEditable = () => {
         doc.querySelectorAll("h1, h2, h3, h4, h5, h6, p, li, span, td, th").forEach((el) => {
           const htmlEl = el as HTMLElement;
@@ -120,7 +122,7 @@ export default function SlidePreview({ html, onContentEdit, loading = false }: P
         iframe.addEventListener("load", setupEditable, { once: true });
       }
     }
-  }, [html, onContentEdit]);
+  }, [html]);
 
   useEffect(() => {
     if (prevHtmlRef.current && prevHtmlRef.current !== html) {
@@ -247,3 +249,5 @@ export default function SlidePreview({ html, onContentEdit, loading = false }: P
     </div>
   );
 }
+
+export default memo(SlidePreview, (prev, next) => prev.html === next.html && prev.loading === next.loading);
