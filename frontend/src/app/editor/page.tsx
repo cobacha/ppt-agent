@@ -58,6 +58,15 @@ function EditorPage() {
   useEffect(() => {
     fetchStyles().then((data) => setStylePresets(data.presets));
   }, []);
+
+  // Show transient errors as auto-dismissing toast
+  useEffect(() => {
+    if (!state.error || state.slides.length === 0) return;
+    setToast(state.error);
+    const timer = setTimeout(() => setToast(null), 8000);
+    return () => clearTimeout(timer);
+  }, [state.error, state.slides.length]);
+
   const genStartRef = useRef<number>(0);
 
   const hasStarted = useRef(false);

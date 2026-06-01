@@ -371,18 +371,24 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     });
   }, [pushUndo]);
 
+  const prevBlobUrlsRef = useRef<string[]>([]);
+
   const previewFull = useCallback(async () => {
     try {
+      // Revoke previous blob URLs to prevent memory leaks
+      prevBlobUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+      prevBlobUrlsRef.current = [];
+
       const slides = state.slides.map((s) => ({ html: s.html }));
       const result = await exportPresentation(slides, state.style, state.title);
-      // Use sandbox iframe with Blob src to isolate LLM-generated HTML from parent origin
       const contentBlob = new Blob([result.html], { type: "text/html" });
       const contentUrl = URL.createObjectURL(contentBlob);
       const wrapper = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview</title><style>*{margin:0;padding:0}iframe{width:100vw;height:100vh;border:none}</style></head><body><iframe sandbox="allow-scripts" src="${contentUrl}"></iframe></body></html>`;
       const blob = new Blob([wrapper], { type: "text/html" });
       const url = URL.createObjectURL(blob);
+      prevBlobUrlsRef.current = [url, contentUrl];
       window.open(url, "_blank");
-      setTimeout(() => { URL.revokeObjectURL(url); URL.revokeObjectURL(contentUrl); }, 60000);
+      setTimeout(() => { URL.revokeObjectURL(url); URL.revokeObjectURL(contentUrl); prevBlobUrlsRef.current = []; }, 60000);
     } catch (err) {
       const message = err instanceof Error ? err.message : "预览失败";
       setState((s) => ({ ...s, error: message }));
@@ -499,6 +505,9 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     const total = currentSlides.length;
     const completedBefore = currentSlides.filter(s => s.html && s.html !== "__FAILED__").length;
 
+    const continueController = new AbortController();
+    abortControllerRef.current = continueController;
+
     setState((s) => ({
       ...s,
       generating: true,
@@ -512,6 +521,7 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
 
     try {
       for (let i = 0; i < indices.length; i += BATCH) {
+        if (continueController.signal.aborted) break;
         const batch = indices.slice(i, i + BATCH);
         setState((s) => ({
           ...s,

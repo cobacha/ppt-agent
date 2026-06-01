@@ -19,12 +19,12 @@ class QualityReport:
         return self.issues
 
 
-LLM_CHECK_PROMPT = """你是一个 HTML 幻灯片质量审核专家。检查以下单页幻灯片 HTML，评估：
+LLM_CHECK_PROMPT = """你是一个 HTML 幻灯片质量审核专家。只关注**真正影响可用性**的严重问题。
 
-1. **内容溢出风险**：内容是否可能超出 100vh 视口高度？考虑 padding、标题、正文、卡片等总高度
-2. **布局完整性**：所有元素是否正确对齐？是否有遮挡或重叠？
-3. **文字可读性**：字号是否过小？对比度是否足够？
-4. **内容完整性**：标题和内容是否完整展示（不被截断）？
+检查重点（按优先级）：
+1. **内容溢出**：内容是否明显超出视口（有 overflow:hidden 时内容被截断不可见）？
+2. **布局崩坏**：元素是否严重重叠/遮挡导致无法阅读？
+3. **空白/残缺**：是否大面积空白或内容明显缺失？
 
 返回 JSON（无其他文字）：
 ```json
@@ -36,13 +36,17 @@ LLM_CHECK_PROMPT = """你是一个 HTML 幻灯片质量审核专家。检查以�
 }
 ```
 
-评分标准：
-- 90-100: 完美，无问题
-- 70-89: 小瑕疵但可接受
-- 50-69: 有明显问题需修复
-- 0-49: 严重问题必须重做
+评分标准（宽松判定）：
+- 85-100: 正常可用，内容完整展示
+- 70-84: 有小瑕疵但不影响阅读
+- 50-69: 有明显问题（溢出或布局崩坏）
+- 0-49: 严重问题（大片内容不可见或完全乱版）
 
-**重要**：如果内容量明显超过单屏能展示的范围（例如超过5个要点、多于4张卡片、大段文字），必须判 passed=false。"""
+**注意**：
+- 5-6个要点是正常的，不算溢出
+- 字号略小但可读 → 不扣分
+- 缺少动画/渐变等美化 → 不扣分
+- 只有**内容真正不可见或布局完全崩坏**才判 passed=false"""
 
 
 class QualityGate:
@@ -60,7 +64,7 @@ class QualityGate:
         return QualityReport(passed=len(issues) == 0, issues=issues, warnings=warnings, score=score)
 
     def check_single(self, html: str) -> QualityReport:
-        """Check a single slide section."""
+        """Check a single slide section. Focus on critical structural issues only."""
         issues = []
         warnings = []
 
@@ -76,28 +80,30 @@ class QualityGate:
         else:
             issues.append("No <section> element found")
 
-        # Bullet density
+        # Bullet density — only flag extreme cases
         li_count = html.count("<li")
-        if li_count > 8:
-            issues.append(f"Slide has {li_count} bullets (max 6 recommended)")
+        if li_count > 10:
+            issues.append(f"Slide has {li_count} bullets (max 8 recommended)")
+        elif li_count > 6:
+            warnings.append(f"Slide has {li_count} bullets (consider reducing)")
 
-        # Font import check
+        # Font import check — soft warning only, no score penalty
         if "fonts.googleapis.com" not in html and "fontshare.com" not in html:
-            warnings.append("No font import (Google Fonts or Fontshare link)")
+            pass  # Many models don't add font imports — not a quality issue
 
-        # Responsive clamp() usage
+        # Responsive clamp() usage — only flag if excessive fixed sizes
         style_blocks = re.findall(r"(?:style=\"[^\"]*\"|<style[^>]*>.*?</style>)", html, re.DOTALL)
         style_text = " ".join(style_blocks)
         fixed_sizes = [fs for fs in re.findall(r"font-size:\s*([^;\"]+)", style_text)
                        if "clamp" not in fs and "var(" not in fs and "inherit" not in fs]
-        if len(fixed_sizes) > 3:
+        if len(fixed_sizes) > 6:
             warnings.append(f"{len(fixed_sizes)} fixed font-sizes without responsive clamp()")
 
         # Minimum content: at least one heading element
         if not re.search(r"<h[1-6]", html):
-            issues.append("Slide missing heading element (h1-h6)")
+            warnings.append("Slide missing heading element (h1-h6)")
 
-        score = max(0, 100 - len(issues) * 15 - len(warnings) * 5)
+        score = max(0, 100 - len(issues) * 15 - len(warnings) * 3)
         return QualityReport(passed=len(issues) == 0, issues=issues, warnings=warnings, score=score)
 
     def _check_viewport(self, html: str) -> list[str]:

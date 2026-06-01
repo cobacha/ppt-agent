@@ -136,8 +136,8 @@ class PPTAgent:
         self, spec: dict, style: str, slide_index: int, context_slides: list[dict], language: str = "zh"
     ) -> SlideResult:
         """Stage 2: Generate one slide from spec with context. Auto-retries on low quality."""
-        MAX_RETRIES = 2
-        QUALITY_THRESHOLD = 80
+        MAX_RETRIES = 1
+        QUALITY_THRESHOLD = 70
         best_html = ""
         best_score = 0.0
         retry_spec = dict(spec)
@@ -155,9 +155,14 @@ class PPTAgent:
             report = self.quality_gate.check_single(html)
 
             if report.score >= QUALITY_THRESHOLD and report.passed:
-                # LLM-based quality check
-                llm_report = self.quality_gate.llm_check_single(html, self.client, self.model)
-                combined_score = min(report.score, llm_report.score)
+                # LLM-based quality check (best-effort — timeout/error degrades gracefully)
+                try:
+                    llm_report = self.quality_gate.llm_check_single(html, self.client, self.model)
+                    combined_score = min(report.score, llm_report.score)
+                except Exception:
+                    # LLM check failed (timeout/rate-limit) — use rule-based score only
+                    combined_score = report.score
+                    llm_report = None
 
                 if combined_score >= QUALITY_THRESHOLD:
                     return SlideResult(
@@ -171,7 +176,7 @@ class PPTAgent:
                 if combined_score > best_score:
                     best_html, best_score = html, combined_score
 
-                if attempt < MAX_RETRIES:
+                if attempt < MAX_RETRIES and llm_report is not None:
                     feedback_parts = llm_report.issues + [w for w in llm_report.warnings if w]
                     retry_spec = dict(spec)
                     retry_spec["quality_feedback"] = (

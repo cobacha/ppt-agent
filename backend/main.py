@@ -44,7 +44,8 @@ logger = logging.getLogger("ppt-agent")
 STYLES_DIR = Path(__file__).parent / "styles"
 OUTPUT_DIR = Path(__file__).parent.parent / "output"
 
-executor = ThreadPoolExecutor(max_workers=12, thread_name_prefix="ppt-gen")
+_MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "16"))
+executor = ThreadPoolExecutor(max_workers=_MAX_WORKERS, thread_name_prefix="ppt-gen")
 
 # Singleton PPTAgent instance (initialized at startup)
 _agent: PPTAgent | None = None
@@ -480,7 +481,10 @@ async def get_outline(req: OutlineRequest):
     if error:
         raise HTTPException(status_code=422, detail=error)
     agent = get_agent()
-    outline = agent.generate_outline(req.content, language=req.language)
+    loop = asyncio.get_event_loop()
+    outline = await loop.run_in_executor(
+        executor, lambda: agent.generate_outline(req.content, language=req.language)
+    )
 
     slides = [
         SlideSpecDTO(
@@ -500,11 +504,14 @@ async def get_outline(req: OutlineRequest):
 async def generate_single_slide(req: GenerateSlideRequest):
     """Stage 2: Generate a single slide with context."""
     agent = get_agent()
-    result = agent.generate_single_from_spec(
-        spec=req.slide_spec,
-        style=req.style,
-        slide_index=req.slide_index,
-        context_slides=req.context_slides,
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        executor, lambda: agent.generate_single_from_spec(
+            spec=req.slide_spec,
+            style=req.style,
+            slide_index=req.slide_index,
+            context_slides=req.context_slides,
+        )
     )
 
     return GenerateSlideResponse(html=result.html, quality_score=result.quality_score)
@@ -529,12 +536,15 @@ async def duplicate_slide(req: DuplicateSlideRequest):
         return DuplicateSlideResponse(html=req.source_html, quality_score=100.0)
 
     agent = get_agent()
-    result = agent.regenerate_slide(
-        slide_index=req.slide_index,
-        content=req.new_content,
-        layout="auto",
-        style=req.style,
-        context=f"Match the visual layout and style of this reference slide:\n{req.source_html[:2000]}",
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        executor, lambda: agent.regenerate_slide(
+            slide_index=req.slide_index,
+            content=req.new_content,
+            layout="auto",
+            style=req.style,
+            context=f"Match the visual layout and style of this reference slide:\n{req.source_html[:2000]}",
+        )
     )
     return DuplicateSlideResponse(html=result.html, quality_score=result.quality_score)
 
@@ -648,6 +658,7 @@ async def generate_stream(req: StreamRequest, request: Request):
                 future = loop.run_in_executor(executor, run_streaming_with_queue)
 
                 # Consume thinking chunks — poll without blocking the event loop or exhausting threads
+                outline_heartbeat = 0
                 while True:
                     try:
                         chunk = think_queue.get_nowait()
@@ -660,6 +671,10 @@ async def generate_stream(req: StreamRequest, request: Request):
                                     yield f"event: thinking\ndata: {json.dumps({'text': c}, ensure_ascii=False)}\n\n"
                             break
                         await asyncio.sleep(0.15)
+                        outline_heartbeat += 1
+                        if outline_heartbeat >= 67:  # ~10s
+                            yield ":heartbeat\n\n"
+                            outline_heartbeat = 0
                         continue
 
                     if chunk is None:
@@ -674,7 +689,9 @@ async def generate_stream(req: StreamRequest, request: Request):
                 logger.warning(f"Streaming outline failed, falling back: {e}")
                 for attempt in range(2):
                     try:
-                        outline = agent.generate_outline(req.content, language=req.language)
+                        outline = await loop.run_in_executor(
+                            executor, lambda: agent.generate_outline(req.content, language=req.language)
+                        )
                         break
                     except Exception as retry_err:
                         if attempt == 1:
@@ -779,14 +796,23 @@ async def generate_stream(req: StreamRequest, request: Request):
 
                 # Drain slide_step events while waiting for batch to complete
                 gather_task = asyncio.ensure_future(asyncio.gather(*futures, return_exceptions=True))
+                heartbeat_counter = 0
                 while not gather_task.done():
+                    if await request.is_disconnected():
+                        gather_task.cancel()
+                        return
                     try:
                         evt = slide_events.get_nowait()
                         if evt:
                             yield f"event: {evt['type']}\ndata: {json.dumps(evt, ensure_ascii=False)}\n\n"
+                            heartbeat_counter = 0
                     except queue.Empty:
                         pass
                     await asyncio.sleep(0.1)
+                    heartbeat_counter += 1
+                    if heartbeat_counter >= 100:  # ~10s without events
+                        yield ":heartbeat\n\n"
+                        heartbeat_counter = 0
 
                 # Drain remaining events
                 while not slide_events.empty():
@@ -828,12 +854,14 @@ async def generate_stream(req: StreamRequest, request: Request):
                             "content_type": failed_spec.content_type,
                             "suggested_layout": failed_spec.suggested_layout,
                         }
-                        retry_result = agent.generate_single_from_spec(
-                            spec=spec_dict,
-                            style=req.style,
-                            slide_index=failed_idx,
-                            context_slides=context_slides[-3:],
-                            language=req.language,
+                        retry_result = await loop.run_in_executor(
+                            executor, lambda fi=failed_idx, sd=spec_dict, cs=context_slides[-3:]: agent.generate_single_from_spec(
+                                spec=sd,
+                                style=req.style,
+                                slide_index=fi,
+                                context_slides=cs,
+                                language=req.language,
+                            )
                         )
                         result_data = {
                             "index": failed_idx,
@@ -908,7 +936,10 @@ async def generate(req: GenerateRequest):
     if error:
         raise HTTPException(status_code=422, detail=error)
     agent = get_agent()
-    result = agent.generate_bulk(req.content, req.style, max_iterations=req.max_iterations)
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        executor, lambda: agent.generate_bulk(req.content, req.style, max_iterations=req.max_iterations)
+    )
 
     return GenerateResponse(
         slides=[
@@ -925,14 +956,15 @@ async def generate(req: GenerateRequest):
 @app.post("/api/regen", response_model=RegenResponse)
 async def regenerate_slide(req: RegenRequest):
     agent = get_agent()
-    result = agent.regenerate_slide(
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(executor, lambda: agent.regenerate_slide(
         slide_index=req.slide_index,
         content=req.content,
         layout=req.layout,
         style=req.style,
         context=req.context,
         context_slides=req.context_slides,
-    )
+    ))
 
     return RegenResponse(html=result.html, quality_score=result.quality_score)
 
@@ -1239,6 +1271,9 @@ def _mask_key(key: str) -> str:
     return key[:7] + "..." + key[-4:]
 
 
+_env_file_lock = __import__("threading").Lock()
+
+
 def _read_env_file() -> dict[str, str]:
     """Read backend/.env into a dict."""
     env_path = Path(__file__).parent / ".env"
@@ -1255,7 +1290,13 @@ def _read_env_file() -> dict[str, str]:
 
 
 def _write_env_file(data: dict[str, str]):
-    """Update backend/.env preserving comments, order, and unrecognized keys."""
+    """Update backend/.env preserving comments, order, and unrecognized keys.
+    Uses file lock to prevent concurrent write corruption."""
+    with _env_file_lock:
+        _write_env_file_locked(data)
+
+
+def _write_env_file_locked(data: dict[str, str]):
     env_path = Path(__file__).parent / ".env"
     updated_keys: set[str] = set()
     output_lines: list[str] = []
@@ -1281,7 +1322,21 @@ def _write_env_file(data: dict[str, str]):
         if k not in updated_keys:
             output_lines.append(f"{k}={v}")
 
-    env_path.write_text("\n".join(output_lines) + "\n")
+    import tempfile
+    content = "\n".join(output_lines) + "\n"
+    fd, tmp_path = tempfile.mkstemp(dir=env_path.parent, suffix=".tmp")
+    closed = False
+    try:
+        os.write(fd, content.encode())
+        os.close(fd)
+        closed = True
+        os.replace(tmp_path, str(env_path))
+    except Exception:
+        if not closed:
+            os.close(fd)
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
 
 
 @app.get("/api/settings")
