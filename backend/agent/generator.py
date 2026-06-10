@@ -1,11 +1,77 @@
 """HTML Generator - Produces presentation HTML via LLM."""
 
+import logging
+import re
 from pathlib import Path
 
 import yaml
 
 from .llm_client import LLMClient
 from .analyzer import SlideOutline
+from utils.aspect_ratio import DEFAULT as _DEFAULT_AR, SUPPORTED as _SUPPORTED_AR
+
+
+# Known layout classes (matches the prompt's allowed list). Used to coerce
+# verbose layout hints from the analyzer back into a short kebab-case class
+# the LLM will emit on the section.
+_KNOWN_LAYOUT_CLASSES = {
+    "trend-bands", "cascade-grid", "scorecard-strip", "asym-compare",
+    "editorial-split", "h-track", "dual-timeline", "kpi-hero-row",
+    "opp-ladder", "risk-stack", "data-table", "grid-3", "grid-2",
+    "concentric-rings", "hero", "closing",
+}
+
+
+def _layout_class_for(layout_hint: str, content_type: str) -> str:
+    """Pick a layout class. Prefer an exact known class in the hint, else
+    a sensible default by content_type."""
+    if layout_hint:
+        # Match longest known class first — `hero` would otherwise match inside
+        # `kpi-hero-row` (because `\b` treats `-` as a word boundary), causing
+        # the wrong class to win. Sort descending by length to break ties.
+        for known in sorted(_KNOWN_LAYOUT_CLASSES, key=len, reverse=True):
+            # Use boundary that excludes `-` so e.g. `hero` doesn't match
+            # inside `kpi-hero-row`. Lookbehind/lookahead reject hyphens.
+            if re.search(rf"(?<![-\w]){re.escape(known)}(?![-\w])", layout_hint, re.IGNORECASE):
+                return known
+        # Otherwise pick by keyword heuristics on the description
+        ht = layout_hint.lower()
+        if "kpi" in ht or "metric" in ht and "row" in ht:
+            return "kpi-hero-row"
+        if "split" in ht or "60/40" in ht or "70/30" in ht:
+            return "editorial-split"
+        if "horizontal" in ht and ("panel" in ht or "track" in ht):
+            return "h-track"
+        if "stagger" in ht or "cascade" in ht:
+            return "cascade-grid"
+        if "timeline" in ht:
+            return "dual-timeline"
+        if "step" in ht or "ladder" in ht:
+            return "opp-ladder"
+        if "table" in ht:
+            return "data-table"
+        if "ring" in ht or "concentric" in ht:
+            return "concentric-rings"
+        if "compare" in ht or "asymmetric" in ht:
+            return "asym-compare"
+        if "stack" in ht or "severity" in ht or "gauge" in ht:
+            return "risk-stack"
+        if "score" in ht or "fill bar" in ht:
+            return "scorecard-strip"
+        if "strip" in ht or "band" in ht:
+            return "trend-bands"
+        if "3-column" in ht or "3 column" in ht:
+            return "grid-3"
+        if "2-column" in ht or "2 column" in ht:
+            return "grid-2"
+    # Fallback by role
+    if content_type == "cover":
+        return "hero"
+    if content_type == "closing":
+        return "closing"
+    return "grid-2"
+
+logger = logging.getLogger("ppt-agent")
 
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
@@ -33,8 +99,17 @@ class HTMLGenerator:
                 return yaml.safe_load(f) or {}
         return {}
 
-    def generate_full(self, outline: SlideOutline, style: str) -> str:
+    def generate_full(self, outline: SlideOutline, style: str, language: str = "zh") -> str:
         system = self._build_system_prompt(style)
+        # Without this, /api/generate (non-streaming) silently produced
+        # Chinese decks regardless of the requested language because the
+        # base template is in Chinese.
+        lang_rule = (
+            "All visible text content on the slides MUST be in Chinese (中文)."
+            if language == "zh"
+            else "All visible text content on the slides MUST be in English."
+        )
+        system += f"\n\n{lang_rule}"
         user_msg = self._format_outline(outline)
 
         response = self.client.chat_completion(
@@ -77,16 +152,26 @@ class HTMLGenerator:
         layout = spec.get("suggested_layout", "auto")
         bullets_text = "\n".join(f"  - {b}" for b in spec.get("bullets", []))
         detailed_content = spec.get("detailed_content", "")
-        aspect_ratio = spec.get("aspect_ratio", "16:9")
+        aspect_ratio = spec.get("aspect_ratio", _DEFAULT_AR)
+        # Coerce unknown values to default so we never emit broken CSS.
+        if aspect_ratio not in _SUPPORTED_AR:
+            aspect_ratio = _DEFAULT_AR
 
-        # Map aspect ratio to CSS dimensions
+        # Map aspect ratio to CSS viewport-relative dimensions for the
+        # generated section. The CSS expressions can't live in
+        # utils.aspect_ratio (that module is platform-neutral); but the keys
+        # MUST be a subset of SUPPORTED — guarded by the assert below so
+        # adding a ratio to SUPPORTED without updating this map is loud.
         ar_map = {
-            "16:9": ("100vw", "100vh"),
-            "4:3": ("min(100vw, 133.33vh)", "min(100vh, 75vw)"),
+            "16:9":  ("100vw", "100vh"),
+            "4:3":   ("min(100vw, 133.33vh)", "min(100vh, 75vw)"),
             "16:10": ("min(100vw, 160vh)", "min(100vh, 62.5vw)"),
-            "1:1": ("min(100vw, 100vh)", "min(100vh, 100vw)"),
+            "1:1":   ("min(100vw, 100vh)", "min(100vh, 100vw)"),
         }
-        ar_width, ar_height = ar_map.get(aspect_ratio, ("100vw", "100vh"))
+        assert _SUPPORTED_AR.issubset(ar_map.keys()), (
+            f"generator.ar_map missing entries for: {_SUPPORTED_AR - ar_map.keys()}"
+        )
+        ar_width, ar_height = ar_map[aspect_ratio]
         system += f"\n\nSlide aspect ratio: {aspect_ratio}. Use width: {ar_width}; height: {ar_height}; on the section."
 
         detail_section = ""
@@ -104,6 +189,13 @@ class HTMLGenerator:
         elif content_type == "closing":
             role_hint = "\nThis is the CLOSING slide — use a centered, minimal layout (thank-you, Q&A, or call-to-action). Keep it clean and conclusive."
 
+        # Map verbose layout descriptions in suggested_layout back to short
+        # class names the validator can recognise. The LLM ignores hints
+        # like "Equal-width horizontal panels with dividers" and emits
+        # `class="slide"` literally — so we extract a kebab-case token from
+        # the hint, default to a sensible class for content_type if absent.
+        layout_class = _layout_class_for(layout, content_type)
+
         user_msg = f"""Generate slide #{slide_index + 1}.
 
 Title: {spec.get('title', '')}
@@ -114,7 +206,12 @@ Bullets:
 
 {f"Context (previous slides):{chr(10)}{context_text}" if context_text else "This is the first slide."}{pres_section}
 
-Generate ONLY the <section class="slide">...</section> HTML for this single slide.
+CRITICAL — output structure:
+- The root MUST be exactly: <section class="slide {layout_class}"> ... </section>
+- The second class "{layout_class}" identifies the layout pattern; do NOT omit it.
+- This is required for layout-diversity validation across the deck.
+
+Generate ONLY the <section class="slide {layout_class}">...</section> HTML for this single slide.
 Include inline styles consistent with the style preset. Make it visually polished."""
 
         quality_feedback = spec.get("quality_feedback", "")
@@ -124,20 +221,29 @@ Include inline styles consistent with the style preset. Make it visually polishe
         # Use structured system with cache_control so the system prompt (which is
         # identical across all slides in a generation) is cached by the Anthropic API.
         # For non-Anthropic providers, the client extracts text and ignores cache_control.
+        # Retry temperature: T=0 produces deterministic output, so a retry with the
+        # same prompt yields ≈ the same broken slide. The loop bumps temperature on
+        # retries to force the model into a different sample of the distribution —
+        # the only way feedback like "上一版溢出 9659px" can actually steer output.
+        retry_temp = float(spec.get("retry_temperature") or 0.0)
         response = self.client.chat_completion(
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user_msg}],
             max_tokens=8192,
+            temperature=retry_temp,
             timeout=60.0,
         )
 
-        return self._post_process_slide(self._extract_html(response.text), style)
+        return self._post_process_slide(self._extract_html(response.text), style, layout_class=layout_class)
 
     def generate_single(
         self, content: str, layout: str, style: str, context: str, slide_index: int
     ) -> str:
         system = self._regen_prompt or self._generation_prompt
         system += f"\n\nStyle: {style}\nLayout pattern to use: {layout}"
+
+        if style in self._presets_cache:
+            system += f"\n\nStyle preset:\n```yaml\n{yaml.dump(self._presets_cache[style])}\n```"
 
         if self._base_css:
             system += f"\n\nBase CSS (include relevant parts):\n```css\n{self._base_css}\n```"
@@ -201,6 +307,18 @@ Use the '{layout}' layout pattern. Include relevant inline styles."""
 
     def _extract_html(self, text: str) -> str:
         """Extract HTML from LLM response. If multiple ```html blocks, take the longest."""
+        # 1) Strip <think>...</think> reasoning blocks emitted by some models
+        #    (Qwen/R1/GLM/Sonnet-thinking variants on custom gateways). These
+        #    leak into the final HTML body because <think> starts with `<`,
+        #    which previously slipped past the `startswith("<")` passthrough.
+        text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        # Also handle a stray opening <think> with no closer (truncated CoT).
+        if re.search(r"<think\b", text, re.IGNORECASE) and not re.search(r"</think>", text, re.IGNORECASE):
+            # Drop everything up to and including the orphan opener's first
+            # `<section`/`<!DOCTYPE`/`<link` boundary if any; otherwise nuke it.
+            m = re.search(r"<(?:section|!DOCTYPE|link|style|html)\b", text, re.IGNORECASE)
+            text = text[m.start():] if m else re.sub(r"<think\b[^>]*>", "", text, flags=re.IGNORECASE)
+
         if "```html" in text:
             blocks = text.split("```html")[1:]
             candidates = []
@@ -209,16 +327,159 @@ Use the '{layout}' layout pattern. Include relevant inline styles."""
                 candidates.append(html_part.strip())
             # Take the longest block
             text = max(candidates, key=len) if candidates else text
-        elif text.strip().startswith("<!DOCTYPE") or text.strip().startswith("<"):
-            pass
+        else:
+            # 2) Strip any prose/preamble before the first real HTML tag we
+            #    care about. Some models emit "Here is the slide:\n<section>"
+            #    or similar narration even after we've removed <think>.
+            #    We do this regardless of leading char — narration may start
+            #    with prose, not with `<`.
+            m = re.search(
+                r"<(?:!DOCTYPE|html|section|link|style)\b", text, re.IGNORECASE
+            )
+            if m:
+                if m.start() > 0:
+                    text = text[m.start():]
+                # else: text already starts with HTML — pass through
+            else:
+                # LLM returned plain text without HTML — wrap in a minimal slide structure
+                logger.warning("LLM returned non-HTML response, wrapping in fallback slide")
+                escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                text = (
+                    '<section style="height:100vh;overflow:hidden;display:flex;align-items:center;'
+                    'justify-content:center;padding:clamp(2rem,5vw,4rem)">'
+                    f'<p style="font-size:clamp(1rem,2vw,1.5rem);white-space:pre-wrap">{escaped}</p>'
+                    '</section>'
+                )
         return text.strip()
 
-    def _post_process_slide(self, html: str, style: str) -> str:
+    def _post_process_slide(self, html: str, style: str, layout_class: str = "") -> str:
         """Inject consistent base styles that the LLM sometimes forgets."""
         import re
 
         if '<section' not in html:
             return html
+
+        # Defense in depth: strip everything after the LAST </section>.
+        # Generator emits ONE slide section per call — nothing legitimate
+        # follows it. Models occasionally emit:
+        #   - "The slide is complete.\n```" prose / markdown closers
+        #   - Stray <style<style>...</style> blocks with the orphan CSS that
+        #     should have been inside the section's existing <style> tag
+        #     (browser parses `<style<style>` as malformed and renders the
+        #     rules as visible body text — see slide 0 / WWDC2026 hero)
+        #   - Duplicate trailing <script> blocks
+        # An earlier policy preserved <style|script|link> in the tail under
+        # the assumption they might be legitimate footers; in practice every
+        # observed case was junk. Strip unconditionally.
+        last_close = html.lower().rfind('</section>')
+        if last_close != -1:
+            tail = html[last_close + len('</section>'):]
+            if tail.strip():
+                html = html[:last_close + len('</section>')]
+
+        # CRITICAL: collapse malformed `<style<style>` (and similar double-open
+        # patterns) into a single legal `<style>`. Some models emit this when
+        # they meant `</style><style>` — they accidentally use `<` instead of
+        # `</`. Browsers interpret `<style<style>` as a `<style>` tag with a
+        # bogus attribute named "<style", which then opens a real style
+        # block; but in practice the contents render inconsistently and
+        # observed pages show the rule body leaking as visible text inside
+        # the slide. Treat any `<style...<style>` (with no `>` between) as
+        # a single open. Same defense for `<script<script>` though we have
+        # not yet seen this in the wild.
+        html = re.sub(
+            r"<style\b[^>]*<style\b([^>]*)>",
+            r"<style\1>",
+            html,
+            flags=re.IGNORECASE,
+        )
+        html = re.sub(
+            r"<script\b[^>]*<script\b([^>]*)>",
+            r"<script\1>",
+            html,
+            flags=re.IGNORECASE,
+        )
+
+        # Strip orphan close-tag fragments that some models emit ("</style></style>"
+        # collapses to "</style>/style>" after a sibling deduplicator, or the
+        # model literally writes "/style>" without a leading "<"). Without
+        # this, browsers render the literal text "/style>" inside the slide.
+        # Only target /style>, /script>, /link>, /head> — the real tags that
+        # are usually duplicated. We do NOT touch /section>, /div>, /h*> etc
+        # because those are common content endings where a typo shouldn't
+        # silently reshape the document.
+        html = re.sub(
+            r"(?<!<)/(?:style|script|link|head)>", "", html, flags=re.IGNORECASE
+        )
+
+        # Safety net: if the LLM emitted only `class="slide"` without the
+        # layout discriminator class we requested, splice it in. Without
+        # this, the deck-level layout-diversity validator reports zero
+        # distinct layouts even on a perfectly varied deck.
+        if layout_class and layout_class != "slide":
+            class_match = re.search(
+                r"<section\b[^>]*?\bclass\s*=\s*[\"']([^\"']*)[\"']",
+                html,
+                re.IGNORECASE,
+            )
+            if class_match:
+                classes = class_match.group(1).split()
+                has_layout = any(c in _KNOWN_LAYOUT_CLASSES for c in classes if c.lower() != "slide")
+                if not has_layout and layout_class not in classes:
+                    new_classes = " ".join(classes + [layout_class])
+                    html = (
+                        html[: class_match.start(1)]
+                        + new_classes
+                        + html[class_match.end(1):]
+                    )
+            else:
+                # No `class` attribute at all on the section — insert one.
+                # This happens when the LLM forgets the class entirely or
+                # the fallback _extract_html wrapping path produced bare
+                # `<section style="...">`.
+                html = re.sub(
+                    r"<section\b",
+                    f'<section class="slide {layout_class}"',
+                    html,
+                    count=1,
+                )
+
+        # Fix CSS leakage: bare CSS rules outside <style> tags get wrapped.
+        # Detect patterns like ".classname {" or "[data-x] {" or "section {" appearing in body text.
+        # IMPORTANT: skip content already inside <style>...</style> blocks. We
+        # used to wrap blindly, which double-wrapped legitimate style content
+        # any time a malformed `<style<style>` was repaired upstream — yielding
+        # `<style><style>...</style></style>` which browsers render as text.
+        def _wrap_leaked_css(match_html: str) -> str:
+            # Mask out everything inside <style>...</style> with a sentinel so
+            # the wrap regex can't match across it. Keep mapping to restore.
+            sentinels: list[str] = []
+            def _mask(m):
+                sentinels.append(m.group(0))
+                return f"\x00STYLE{len(sentinels)-1}\x00"
+            masked = re.sub(
+                r"<style\b[^>]*>.*?</style>",
+                _mask,
+                match_html,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+
+            def fix_leaked(m):
+                content = m.group(1)
+                # Check if this looks like CSS (has { } with properties)
+                if re.search(r'[{]\s*[\w-]+\s*:', content) and content.count('{') > 0:
+                    return f'<style>{content}</style>'
+                return m.group(0)
+            wrapped = re.sub(
+                r'>(\s*(?:\.[a-zA-Z][\w-]*|\[[\w-]+[^\]]*\]|[a-z]+)\s*\{[^<]{20,}?}(?:\s*})*\s*)<',
+                fix_leaked,
+                masked,
+            )
+            # Restore masked style blocks
+            def _unmask(m):
+                return sentinels[int(m.group(1))]
+            return re.sub(r"\x00STYLE(\d+)\x00", _unmask, wrapped)
+        html = _wrap_leaked_css(html)
 
         # Ensure overflow: hidden on the section element specifically
         section_tag_match = re.search(r'<section([^>]*)>', html)
@@ -247,6 +508,27 @@ Use the '{layout}' layout pattern. Include relevant inline styles."""
                 font_link = f'<link href="https://fonts.googleapis.com/css2?family={families_param}:wght@300;400;500;600;700&display=swap" rel="stylesheet">'
                 html = html.replace('<section', f'{font_link}\n<section', 1)
 
+            # Ensure section uses the preset font-family so single-slide iframe
+            # preview doesn't fall back to the browser default (Times). Without
+            # this, individual slides look unstyled in the editor preview even
+            # though they render fine inside the full deck wrapper.
+            if body_font and 'font-family' not in html[:html.find('</style>') if '</style>' in html else min(2000, len(html))]:
+                ff_value = f"'{body_font}', system-ui, -apple-system, sans-serif"
+                # Inject into section's inline style
+                section_match = re.search(r"<section([^>]*)style\s*=\s*\"([^\"]*)\"", html)
+                if section_match:
+                    if 'font-family' not in section_match.group(2):
+                        new_style = section_match.group(2).rstrip("; ") + f"; font-family: {ff_value};"
+                        html = html[:section_match.start(2)] + new_style + html[section_match.end(2):]
+                else:
+                    # No inline style — add one
+                    html = re.sub(
+                        r"<section\b",
+                        f"<section style=\"font-family: {ff_value};\"",
+                        html,
+                        count=1,
+                    )
+
         # Ensure height: 100vh on section's inline style
         section_match = re.search(r'<section[^>]*style="([^"]*)"', html)
         if section_match:
@@ -257,37 +539,83 @@ Use the '{layout}' layout pattern. Include relevant inline styles."""
         elif '100vh' not in html:
             html = html.replace('<section', '<section style="height:100vh;height:100dvh;overflow:hidden;"', 1)
 
-        # Inject anti-overflow CSS: flex column layout + auto-scaling fallback
+        # Inject anti-overflow CSS and fragment system INSIDE the <section> tag
+        # to avoid rendering as visible text nodes outside the element.
+        inject_css = ""
+        inject_js = ""
+
         if '__ppt_antioverflow__' not in html:
-            antioverflow_css = (
+            # Safety net only: clip overflow and constrain box, do NOT override layout.
+            # The LLM picks display:grid/flex/block based on the layout — never force flex-column here.
+            inject_css += (
                 '<style data-id="__ppt_antioverflow__">'
-                'section{display:flex!important;flex-direction:column!important;'
-                'justify-content:flex-start!important;max-height:100vh!important;'
-                'max-height:100dvh!important;box-sizing:border-box!important}'
-                'section>*{flex-shrink:1!important;min-height:0!important}'
-                'section>h1,section>h2,section>h3{flex-shrink:0!important}'
+                'section{max-height:100vh;max-height:100dvh;box-sizing:border-box;overflow:hidden}'
                 '</style>'
             )
-            html = antioverflow_css + '\n' + html
 
-        # Inject entrance animation CSS if not already present
-        if '@keyframes fadeInUp' not in html:
-            anim_css = (
-                '<style>'
+        if '__ppt_fragments__' not in html:
+            inject_css += (
+                '<style data-id="__ppt_fragments__">'
                 '@keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}'
                 '@keyframes fadeIn{from{opacity:0}to{opacity:1}}'
-                'section>h1,section>h2,section>h3,section>p,section>li,section>ul,section>ol'
-                '{animation:fadeInUp .6s ease-out both}'
-                'section>img,section>svg{animation:fadeIn .8s ease-out both}'
-                'section>*:nth-child(1){animation-delay:.1s}'
-                'section>*:nth-child(2){animation-delay:.2s}'
-                'section>*:nth-child(3){animation-delay:.35s}'
-                'section>*:nth-child(4){animation-delay:.5s}'
-                'section>*:nth-child(5){animation-delay:.65s}'
-                'section>*:nth-child(6){animation-delay:.8s}'
-                '@media(prefers-reduced-motion:reduce){section>*{animation:none!important}}'
+                '.fragment{opacity:0;transform:translateY(18px);transition:opacity .5s ease,transform .5s ease;pointer-events:none}'
+                '.fragment.visible{opacity:1;transform:none;pointer-events:auto}'
+                '.fragment.fade-in{transform:none}'
+                '.fragment.fade-up{transform:translateY(18px)}'
+                '.fragment.fade-left{transform:translateX(30px)}'
+                '.fragment.fade-right{transform:translateX(-30px)}'
+                '.fragment.zoom-in{transform:scale(.85)}'
+                '.fragment.visible.fade-in,.fragment.visible.fade-up,'
+                '.fragment.visible.fade-left,.fragment.visible.fade-right,'
+                '.fragment.visible.zoom-in{opacity:1;transform:none}'
+                '.fragment.highlight-current{opacity:.4;transition:opacity .4s}'
+                '.fragment.highlight-current.current-fragment{opacity:1}'
+                'section>h1,section>h2,section>h3{animation:fadeInUp .5s ease-out both}'
+                '@media(prefers-reduced-motion:reduce){.fragment{opacity:1!important;transform:none!important;transition:none!important}}'
                 '</style>'
             )
-            html = anim_css + '\n' + html
+            inject_js += (
+                '<script data-id="__ppt_fragments__">'
+                '(function(){'
+                'var frags=document.querySelectorAll(".fragment");'
+                'var idx=-1;'
+                'function reveal(n){'
+                '  if(n<-1||n>=frags.length)return;'
+                '  idx=n;'
+                '  frags.forEach(function(f,i){f.classList.toggle("visible",i<=idx);f.classList.toggle("current-fragment",i===idx)});'
+                '  window.parent&&window.parent.postMessage({type:"fragment-state",current:idx,total:frags.length},"*");'
+                '}'
+                'function next(){reveal(Math.min(idx+1,frags.length-1))}'
+                'function prev(){reveal(idx-1)}'
+                'document.addEventListener("click",function(e){if(e.button===0)next()});'
+                'document.addEventListener("keydown",function(e){'
+                '  if(e.key==="ArrowRight"||e.key===" ")next();'
+                '  else if(e.key==="ArrowLeft")prev();'
+                '});'
+                'window.addEventListener("message",function(e){'
+                '  if(e.data&&e.data.type==="fragment-cmd"){'
+                '    if(e.data.cmd==="next")next();'
+                '    else if(e.data.cmd==="prev")prev();'
+                '    else if(e.data.cmd==="show-all")reveal(frags.length-1);'
+                '    else if(e.data.cmd==="reset")reveal(-1);'
+                '  }'
+                '});'
+                'reveal(frags.length-1);'
+                '})();'
+                '</script>'
+            )
+
+        # Place CSS right after <section...> opening tag, JS before </section>
+        if inject_css or inject_js:
+            section_open = re.search(r'<section[^>]*>', html)
+            if section_open:
+                insert_pos = section_open.end()
+                html = html[:insert_pos] + inject_css + html[insert_pos:]
+                if inject_js:
+                    close_pos = html.rfind('</section>')
+                    if close_pos != -1:
+                        html = html[:close_pos] + inject_js + html[close_pos:]
+                    else:
+                        html = html + inject_js
 
         return html
