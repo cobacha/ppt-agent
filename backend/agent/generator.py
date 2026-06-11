@@ -675,6 +675,59 @@ Use the '{layout}' layout pattern. Include relevant inline styles."""
         # behavior only kicks in when explicitly opted into via the
         # `[data-frag-hidden]` attribute that the JS sets at startup —
         # if the JS never runs, content stays visible.
+        # Inject default values for common CSS custom properties. The model
+        # sometimes references `var(--page-padding)`, `var(--accent)` etc.
+        # without defining them anywhere on the page — when the fallback
+        # is empty, properties resolve to "" which can collapse padding
+        # to 0 (content vs section edge crops, looks "broken"). Defining
+        # safe defaults at section level lets the model's `var()` calls
+        # always resolve to something sensible. Model-defined vars in the
+        # same scope override these (cascade specificity).
+        if '<style data-id="__ppt_var_defaults__"' not in html:
+            preset_colors = {}
+            preset_fonts = {}
+            if style in self._presets_cache and isinstance(self._presets_cache[style], dict):
+                preset_colors = self._presets_cache[style].get("colors", {}) or {}
+                preset_fonts = self._presets_cache[style].get("fonts", {}) or {}
+            accent = preset_colors.get("accent") or preset_colors.get("accent_blue") or "#4361ee"
+            bg_primary = preset_colors.get("bg_primary") or "#0a0a0a"
+            text_primary = preset_colors.get("text_primary") or "#ffffff"
+            display_font = preset_fonts.get("display") or "Manrope"
+            body_font = preset_fonts.get("body") or display_font
+            inject_css += (
+                '<style data-id="__ppt_var_defaults__">'
+                f"section{{"
+                # Spacing tokens
+                "--page-padding:clamp(2.5rem,6vw,4.5rem);"
+                "--section-padding:clamp(2.5rem,6vw,4.5rem);"
+                "--block-gap:clamp(1.5rem,3vh,2.5rem);"
+                "--inline-gap:clamp(0.8rem,1.5vw,1.2rem);"
+                "--gap:clamp(1rem,2vw,1.5rem);"
+                # Color tokens
+                f"--accent:{accent};"
+                f"--accent-color:{accent};"
+                f"--primary:{accent};"
+                f"--bg-primary:{bg_primary};"
+                f"--bg:{bg_primary};"
+                f"--text-primary:{text_primary};"
+                f"--text:{text_primary};"
+                "--text-dim:rgba(255,255,255,0.62);"
+                "--border-subtle:rgba(255,255,255,0.08);"
+                # Typography tokens
+                "--h1-size:clamp(2.4rem,5.5vw,4.5rem);"
+                "--h2-size:clamp(1.6rem,3.4vw,2.6rem);"
+                "--h3-size:clamp(1.1rem,1.9vw,1.5rem);"
+                "--body-size:clamp(0.9rem,1.35vw,1.15rem);"
+                "--caption-size:clamp(0.7rem,1.05vw,0.85rem);"
+                f"--display-font:'{display_font}',system-ui,sans-serif;"
+                f"--body-font:'{body_font}',system-ui,sans-serif;"
+                # Shadow / radius
+                "--shadow-card:0 1px 2px rgba(0,0,0,0.4),0 12px 32px rgba(0,0,0,0.28);"
+                "--radius:12px;"
+                "}"
+                "</style>"
+            )
+
         if '<style data-id="__ppt_fragments__"' not in html:
             inject_css += (
                 '<style data-id="__ppt_fragments__">'
