@@ -132,6 +132,63 @@ class TestExtractHtml:
         assert "Reasoning that never closes" not in result
         assert result.startswith("<section")
 
+    def test_section_bg_injected_when_missing(self, generator):
+        """Regression: model decorates child elements (orbs, grid overlays)
+        but forgets to set the section's own background. Result is a
+        transparent section that picks up whatever container color the
+        embed environment uses (white in default iframe srcdoc) — slide
+        looks broken next to its dark neighbors. Post-process must inject
+        a bg from the preset when none is found in inline style or user
+        CSS rules targeting the section/layout class."""
+        # Generator needs presets loaded
+        generator._presets_cache = {
+            "electric-studio": {
+                "colors": {"bg_primary": "#0a0a0a", "accent": "#4361ee"},
+                "fonts": {"display": "Manrope", "body": "Manrope"},
+            }
+        }
+        # Section without background, decoration-only CSS (mimics the bug)
+        text = (
+            '<section class="slide cascade-grid" style="overflow:hidden">'
+            '<style>'
+            '.cascade-grid .orb { position:absolute; background: rgba(67,97,238,0.2); }'
+            '.cascade-grid .grid-overlay { background-image: linear-gradient(...); }'
+            '</style>'
+            '<h1>title</h1></section>'
+        )
+        result = generator._post_process_slide(text, "electric-studio", layout_class="cascade-grid")
+        # Section's inline style should now include a background
+        import re as _re
+        sec = _re.search(r'<section[^>]*style="([^"]*)"', result)
+        assert sec, "section should have style attribute"
+        inline_style = sec.group(1)
+        assert "background" in inline_style, \
+            f"background must be injected into section inline style, got: {inline_style}"
+
+    def test_section_bg_NOT_injected_when_already_present(self, generator):
+        """Don't double-set: if user CSS already targets section/layout
+        with a background rule, leave it alone."""
+        generator._presets_cache = {
+            "electric-studio": {
+                "colors": {"bg_primary": "#0a0a0a"},
+                "fonts": {"display": "Manrope", "body": "Manrope"},
+            }
+        }
+        text = (
+            '<section class="slide hero" style="overflow:hidden">'
+            '<style>.hero { background: linear-gradient(135deg, #1a1a2e, #16213e); }</style>'
+            '<h1>title</h1></section>'
+        )
+        result = generator._post_process_slide(text, "electric-studio", layout_class="hero")
+        import re as _re
+        sec = _re.search(r'<section[^>]*style="([^"]*)"', result)
+        # background should NOT be in inline style (rule lives in user CSS)
+        if sec:
+            inline_style = sec.group(1)
+            # We allow font-family, height to be there but not background
+            assert "background:" not in inline_style.lower(), \
+                f"existing user CSS background should not trigger inline injection: {inline_style}"
+
     def test_has_styling_detects_unstyled_slide(self, generator):
         """Regression: model occasionally emits HTML with class names but
         ZERO CSS rules to back them. Browser falls back to unstyled

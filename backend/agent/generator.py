@@ -584,6 +584,71 @@ Use the '{layout}' layout pattern. Include relevant inline styles."""
         elif '100vh' not in html:
             html = html.replace('<section', '<section style="height:100vh;height:100dvh;overflow:hidden;"', 1)
 
+        # Ensure section has a background. Models occasionally style decoration
+        # (orbs, grid overlays) but forget to set the section's own background
+        # — leaves a transparent section showing through whatever container
+        # color the embed environment uses (white in default iframe srcdoc),
+        # making the slide look "broken" next to its dark neighbors.
+        # Strategy: if neither section's inline `style` nor any user CSS rule
+        # targets the section/layout class with a `background`, splice a
+        # default from the preset's bg_primary into the inline style.
+        if style in self._presets_cache:
+            preset_colors = self._presets_cache[style].get("colors", {}) if isinstance(self._presets_cache[style], dict) else {}
+            preset_bg = preset_colors.get("bg_primary") or preset_colors.get("bg_gradient") or "#0a0a0a"
+            section_match = re.search(r'<section([^>]*)>', html)
+            if section_match:
+                attrs = section_match.group(1)
+                inline_style_match = re.search(r'style\s*=\s*"([^"]*)"', attrs)
+                inline_has_bg = inline_style_match and re.search(r"\bbackground\b", inline_style_match.group(1))
+                # Look in any user <style> block for a rule targeting `section`,
+                # `.slide`, or the layout class that sets background.
+                section_class_match = re.search(r"<section[^>]*class\s*=\s*['\"][^'\"]*\bslide\s+([\w-]+)", html)
+                layout_cls = section_class_match.group(1) if section_class_match else ""
+                user_css_blocks = re.findall(
+                    r"<style\b(?![^>]*data-id=\"__ppt_)[^>]*>(.*?)</style>",
+                    html,
+                    re.DOTALL | re.IGNORECASE,
+                )
+                user_css = "\n".join(user_css_blocks)
+                # Selectors that would set the slide background (must NOT be
+                # a deeper-nested rule like `.layout .child`). We require the
+                # selector to end at the layout class — i.e. no `.something`
+                # or whitespace+more selectors before the `{`.
+                bg_in_user_css = False
+                if user_css:
+                    selectors = [r"\.slide\s*\{", r"section\s*\{"]
+                    if layout_cls:
+                        selectors.append(rf"\.{re.escape(layout_cls)}\s*\{{")
+                    for sel in selectors:
+                        for m in re.finditer(sel, user_css):
+                            # peek into the rule body for `background`
+                            tail = user_css[m.end(): m.end() + 400]
+                            brace_close = tail.find("}")
+                            body_block = tail[:brace_close] if brace_close >= 0 else tail
+                            if re.search(r"\bbackground\b", body_block):
+                                bg_in_user_css = True
+                                break
+                        if bg_in_user_css:
+                            break
+
+                if not inline_has_bg and not bg_in_user_css:
+                    # Splice background into the inline style (or create one).
+                    bg_decl = f"background: {preset_bg};"
+                    if inline_style_match:
+                        new_style = inline_style_match.group(1).rstrip("; ") + f"; {bg_decl}"
+                        html = (
+                            html[:section_match.start(1) + inline_style_match.start(1)]
+                            + new_style
+                            + html[section_match.start(1) + inline_style_match.end(1):]
+                        )
+                    else:
+                        html = re.sub(
+                            r"<section\b",
+                            f'<section style="{bg_decl}"',
+                            html,
+                            count=1,
+                        )
+
         # Inject anti-overflow CSS and fragment system INSIDE the <section> tag
         # to avoid rendering as visible text nodes outside the element.
         inject_css = ""
