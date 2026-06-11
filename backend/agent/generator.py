@@ -809,6 +809,62 @@ Use the '{layout}' layout pattern. Include relevant inline styles."""
                 '</script>'
             )
 
+        # Final safety net (runs every time, regardless of which other
+        # injects fired): scan model's CSS + everything we've injected for
+        # `var(--xxx)` references that have no matching `--xxx:` definition.
+        # Each undefined var gets a heuristic default by name pattern.
+        # Without this, creative var names like `--card-bg`, `--surface`,
+        # `--ring` resolve to empty → transparent cards / collapsed
+        # padding / missing borders. The dominant "broken-looking slide"
+        # cause once obvious bugs are fixed.
+        ref_pattern_global = re.compile(r"var\(\s*--([\w-]+)")
+        def_pattern_global = re.compile(r"--([\w-]+)\s*:")
+        all_referenced = set(ref_pattern_global.findall(html))
+        all_defined = set(def_pattern_global.findall(html))
+        all_defined |= set(def_pattern_global.findall(inject_css))
+        all_missing = all_referenced - all_defined
+        if all_missing:
+            preset_for_heuristic = self._presets_cache.get(style, {}) if isinstance(self._presets_cache.get(style), dict) else {}
+            preset_colors_h = preset_for_heuristic.get("colors", {}) or {}
+            accent_h = preset_colors_h.get("accent") or preset_colors_h.get("accent_blue") or "#4361ee"
+            bg_primary_h = preset_colors_h.get("bg_primary") or "#0a0a0a"
+            text_primary_h = preset_colors_h.get("text_primary") or "#ffffff"
+
+            def _guess(name: str) -> str:
+                lname = name.lower().replace("_", "-")
+                if any(k in lname for k in ["bg-card", "card-bg", "surface", "panel-bg", "tile-bg"]):
+                    return "rgba(255,255,255,0.04)"
+                if any(k in lname for k in ["border", "ring", "outline", "stroke"]):
+                    return "rgba(255,255,255,0.10)"
+                if "shadow" in lname:
+                    return "0 12px 32px rgba(0,0,0,0.28)"
+                if any(k in lname for k in ["radius", "rounded"]):
+                    return "12px"
+                if any(k in lname for k in ["gap", "spacing", "padding", "margin"]):
+                    return "clamp(0.8rem,1.5vw,1.2rem)"
+                if any(k in lname for k in ["accent", "primary", "highlight", "brand"]):
+                    return accent_h
+                if any(k in lname for k in ["bg", "background"]):
+                    return bg_primary_h
+                if any(k in lname for k in ["text", "fg", "foreground"]):
+                    return text_primary_h
+                if any(k in lname for k in ["dim", "muted", "secondary", "subtle"]):
+                    return "rgba(255,255,255,0.62)"
+                if any(k in lname for k in ["weight"]):
+                    return "500"
+                if "size" in lname:
+                    return "1rem"
+                return "initial"
+
+            heuristic_decls = "".join(
+                f"--{n}:{_guess(n)};" for n in sorted(all_missing)
+            )
+            inject_css += (
+                '<style data-id="__ppt_var_heuristic__">'
+                f"section{{{heuristic_decls}}}"
+                "</style>"
+            )
+
         # Place CSS right after <section...> opening tag, JS before </section>
         if inject_css or inject_js:
             section_open = re.search(r'<section[^>]*>', html)
