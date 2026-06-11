@@ -694,6 +694,22 @@ Use the '{layout}' layout pattern. Include relevant inline styles."""
             text_primary = preset_colors.get("text_primary") or "#ffffff"
             display_font = preset_fonts.get("display") or "Manrope"
             body_font = preset_fonts.get("body") or display_font
+
+            # Auto-emit a CSS var for every preset.colors key, in both
+            # underscore (`--bg_primary`) and kebab (`--bg-primary`) form.
+            # The model copies YAML keys verbatim into CSS without
+            # case-normalising — so `colors.bg_primary` becomes
+            # `var(--bg_primary)` in their output. We supply both forms so
+            # whichever the model picks resolves correctly.
+            preset_var_defs = []
+            for k, v in preset_colors.items():
+                if not isinstance(v, str):
+                    continue
+                preset_var_defs.append(f"--{k}:{v};")
+                kebab = k.replace("_", "-")
+                if kebab != k:
+                    preset_var_defs.append(f"--{kebab}:{v};")
+
             inject_css += (
                 '<style data-id="__ppt_var_defaults__">'
                 f"section{{"
@@ -703,16 +719,18 @@ Use the '{layout}' layout pattern. Include relevant inline styles."""
                 "--block-gap:clamp(1.5rem,3vh,2.5rem);"
                 "--inline-gap:clamp(0.8rem,1.5vw,1.2rem);"
                 "--gap:clamp(1rem,2vw,1.5rem);"
-                # Color tokens
+                # Generic color aliases
                 f"--accent:{accent};"
                 f"--accent-color:{accent};"
                 f"--primary:{accent};"
-                f"--bg-primary:{bg_primary};"
                 f"--bg:{bg_primary};"
-                f"--text-primary:{text_primary};"
                 f"--text:{text_primary};"
                 "--text-dim:rgba(255,255,255,0.62);"
+                "--text_dim:rgba(255,255,255,0.62);"
                 "--border-subtle:rgba(255,255,255,0.08);"
+                "--border_subtle:rgba(255,255,255,0.08);"
+                # Per-preset color tokens (both _ and - forms)
+                + "".join(preset_var_defs) +
                 # Typography tokens
                 "--h1-size:clamp(2.4rem,5.5vw,4.5rem);"
                 "--h2-size:clamp(1.6rem,3.4vw,2.6rem);"
