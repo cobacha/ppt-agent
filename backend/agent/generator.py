@@ -44,7 +44,7 @@ def _layout_class_for(layout_hint: str, content_type: str) -> str:
             return "h-track"
         if "stagger" in ht or "cascade" in ht:
             return "cascade-grid"
-        if "timeline" in ht:
+        if "timeline" in ht or "connector" in ht:
             return "dual-timeline"
         if "step" in ht or "ladder" in ht:
             return "opp-ladder"
@@ -86,8 +86,9 @@ class HTMLGenerator:
         self._generation_prompt = self._load_file(PROMPTS_DIR / "slide_generation.md")
         self._regen_prompt = self._load_file(PROMPTS_DIR / "single_slide_regen.md")
         self._base_css = self._load_file(TEMPLATES_DIR / "base_css.css")
-        # Cache presets.yaml at init time
+        # Cache presets.yaml + layouts.yaml at init time
         self._presets_cache = self._load_presets()
+        self._layouts_cache = self._load_layouts()
 
     def _load_file(self, path: Path) -> str:
         return path.read_text(encoding="utf-8") if path.exists() else ""
@@ -97,6 +98,21 @@ class HTMLGenerator:
         if style_path.exists():
             with open(style_path) as f:
                 return yaml.safe_load(f) or {}
+        return {}
+
+    def _load_layouts(self) -> dict:
+        """Load layouts.yaml — used to inject execution rules for the
+        chosen layout into the per-slide prompt. Layouts that aren't well
+        executed (dual-timeline missing its center line, asym-compare with
+        equal columns) read as 'failed' even when content is complete."""
+        layouts_path = STYLES_DIR / "layouts.yaml"
+        if layouts_path.exists():
+            try:
+                with open(layouts_path) as f:
+                    data = yaml.safe_load(f) or {}
+                return data.get("layouts", {})
+            except Exception:
+                pass
         return {}
 
     def generate_full(self, outline: SlideOutline, style: str, language: str = "zh") -> str:
@@ -196,13 +212,37 @@ class HTMLGenerator:
         # the hint, default to a sensible class for content_type if absent.
         layout_class = _layout_class_for(layout, content_type)
 
+        # Inject layout-specific execution rules. Without this, layouts
+        # like dual-timeline degrade into "two random lists" because the
+        # model doesn't know its signature element (center vertical line
+        # connecting all entries). User-flagged "failed" slides clustered
+        # on layouts that have a distinguishing visual element the model
+        # didn't draw: dual-timeline (missing connector), asym-compare
+        # (equal columns instead of 3:2), opp-ladder (missing left border),
+        # grid-3 (used for 4+ items).
+        layout_rules_section = ""
+        layout_def = self._layouts_cache.get(layout_class)
+        if layout_def and isinstance(layout_def, dict):
+            must_rules = layout_def.get("execution_must") or []
+            fail_modes = layout_def.get("fails_when") or []
+            if must_rules:
+                rules_md = "\n".join(f"- {r}" for r in must_rules)
+                layout_rules_section = (
+                    f"\n\nLayout `{layout_class}` execution rules — these are the visible "
+                    f"signature of the layout. Without them the slide degenerates into a "
+                    f"generic card grid:\n{rules_md}"
+                )
+                if fail_modes:
+                    failures = ", ".join(fail_modes)
+                    layout_rules_section += f"\n\nThis layout is considered FAILED if any of: {failures}"
+
         user_msg = f"""Generate slide #{slide_index + 1}.
 
 Title: {spec.get('title', '')}
 Content type: {content_type}{role_hint}
 Bullets:
 {bullets_text}
-{detail_section}Layout: {layout}
+{detail_section}Layout: {layout}{layout_rules_section}
 
 {f"Context (previous slides):{chr(10)}{context_text}" if context_text else "This is the first slide."}{pres_section}
 
@@ -210,6 +250,11 @@ CRITICAL — output structure:
 - The root MUST be exactly: <section class="slide {layout_class}"> ... </section>
 - The second class "{layout_class}" identifies the layout pattern; do NOT omit it.
 - This is required for layout-diversity validation across the deck.
+
+CRITICAL — content completeness:
+- 每个 bullet 必须完整呈现：标题 + 至少 1 句描述。绝不允许只放标题或空壳卡片。
+- 内容是主角，装饰是配角。主内容区必须占据 section 中央 ≥ 40% 面积。
+- 装饰元素 ≤ 2 个（gradient-orb / accent-bar / grid-overlay 任选 2）；signature recipe 用 1 条即可。
 
 Generate ONLY the <section class="slide {layout_class}">...</section> HTML for this single slide.
 Include inline styles consistent with the style preset. Make it visually polished."""
@@ -553,30 +598,53 @@ Use the '{layout}' layout pattern. Include relevant inline styles."""
                 '</style>'
             )
 
-        if '__ppt_fragments__' not in html:
+        # Decouple CSS and JS injection. The model occasionally COPIES the
+        # injected fragment <style> block from a context slide but DROPS the
+        # <script>. The previous coupled check (`if '__ppt_fragments__' not
+        # in html`) saw the leaked CSS and skipped both injections — leaving
+        # fragments stuck at opacity:0 forever (JS that toggles `.visible`
+        # never runs). Result: entire timeline / step content invisible
+        # despite being in the DOM. Fix: check CSS and JS independently.
+        # Additional defense: the CSS now defaults `.fragment` to opacity:1
+        # so a missing JS doesn't blank the slide. The hide-by-default
+        # behavior only kicks in when explicitly opted into via the
+        # `[data-frag-hidden]` attribute that the JS sets at startup —
+        # if the JS never runs, content stays visible.
+        if '<style data-id="__ppt_fragments__"' not in html:
             inject_css += (
                 '<style data-id="__ppt_fragments__">'
                 '@keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}'
                 '@keyframes fadeIn{from{opacity:0}to{opacity:1}}'
-                '.fragment{opacity:0;transform:translateY(18px);transition:opacity .5s ease,transform .5s ease;pointer-events:none}'
-                '.fragment.visible{opacity:1;transform:none;pointer-events:auto}'
-                '.fragment.fade-in{transform:none}'
-                '.fragment.fade-up{transform:translateY(18px)}'
-                '.fragment.fade-left{transform:translateX(30px)}'
-                '.fragment.fade-right{transform:translateX(-30px)}'
-                '.fragment.zoom-in{transform:scale(.85)}'
-                '.fragment.visible.fade-in,.fragment.visible.fade-up,'
-                '.fragment.visible.fade-left,.fragment.visible.fade-right,'
-                '.fragment.visible.zoom-in{opacity:1;transform:none}'
-                '.fragment.highlight-current{opacity:.4;transition:opacity .4s}'
-                '.fragment.highlight-current.current-fragment{opacity:1}'
+                # Default-visible: if the JS never runs (stripped by injection
+                # bug, blocked by CSP, removed by streaming truncation), all
+                # fragments still render. Hidden state is opt-in via the
+                # body[data-frag-active] attribute set by the JS at startup.
+                'body[data-frag-active] .fragment{opacity:0;transform:translateY(18px);transition:opacity .5s ease,transform .5s ease;pointer-events:none}'
+                'body[data-frag-active] .fragment.visible{opacity:1;transform:none;pointer-events:auto}'
+                'body[data-frag-active] .fragment.fade-in{transform:none}'
+                'body[data-frag-active] .fragment.fade-up{transform:translateY(18px)}'
+                'body[data-frag-active] .fragment.fade-left{transform:translateX(30px)}'
+                'body[data-frag-active] .fragment.fade-right{transform:translateX(-30px)}'
+                'body[data-frag-active] .fragment.zoom-in{transform:scale(.85)}'
+                'body[data-frag-active] .fragment.visible.fade-in,'
+                'body[data-frag-active] .fragment.visible.fade-up,'
+                'body[data-frag-active] .fragment.visible.fade-left,'
+                'body[data-frag-active] .fragment.visible.fade-right,'
+                'body[data-frag-active] .fragment.visible.zoom-in{opacity:1;transform:none}'
+                'body[data-frag-active] .fragment.highlight-current{opacity:.4;transition:opacity .4s}'
+                'body[data-frag-active] .fragment.highlight-current.current-fragment{opacity:1}'
                 'section>h1,section>h2,section>h3{animation:fadeInUp .5s ease-out both}'
                 '@media(prefers-reduced-motion:reduce){.fragment{opacity:1!important;transform:none!important;transition:none!important}}'
                 '</style>'
             )
+        if '<script data-id="__ppt_fragments__"' not in html:
             inject_js += (
                 '<script data-id="__ppt_fragments__">'
                 '(function(){'
+                # Mark body so the hide-by-default CSS rule kicks in. If this
+                # script never runs, body lacks the marker and all .fragment
+                # elements stay visible (graceful degradation).
+                'document.body.setAttribute("data-frag-active","");'
                 'var frags=document.querySelectorAll(".fragment");'
                 'var idx=-1;'
                 'function reveal(n){'

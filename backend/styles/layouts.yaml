@@ -1,5 +1,6 @@
 # Layout Patterns Library
-# Each layout has CSS class, best-fit content types, and CSS snippet
+# Each layout has CSS class, best-fit content types, execution requirements,
+# and visual signature elements that distinguish it from generic card grids.
 
 layouts:
   trend-bands:
@@ -7,66 +8,154 @@ layouts:
     best_for: [parallel_trends, categories, themes]
     css_class: trend-bands
     children: trend-band
+    execution_must:
+      - Each band spans full width with a 4-6px colored accent stripe on the LEFT edge
+      - Vertical category label rotated 90deg on the left side of each band
+      - Title + 2-column content area inside each band
+    fails_when: [no_accent_stripe, missing_vertical_label, all_bands_same_color]
 
   cascade-grid:
-    description: 3-column staggered cards with increasing top margin
+    description: 3-column staggered cards with increasing top margin (creates diagonal sweep)
     best_for: [three_items, phases, priorities]
     css_class: cascade-grid
     children: cascade-card
+    execution_must:
+      - Card 1 top:0; Card 2 top:clamp(2rem,4vh,3rem); Card 3 top:clamp(4rem,8vh,6rem) — visible cascade
+      - Each card has different accent intensity or hue
+      - Total cards = 3 (do NOT use this layout for 4+ items)
 
   scorecard-strip:
     description: Horizontal row of metric items with fill bars
     best_for: [kpis, ratings, capabilities]
     css_class: scorecard-strip
     children: scorecard-item
+    execution_must:
+      - Each item shows a numeric or % value PROMINENT at top
+      - Below value: thin progress bar (visual gauge) reflecting relative score
+      - 3-5 items per row, equal width
 
   asym-compare:
-    description: Large card (3fr) + stacked small cards (2fr)
+    description: Large hero card (3fr) on one side + stacked small cards (2fr) on the other
     best_for: [pros_cons, strengths_weaknesses, main_vs_secondary]
     css_class: asym-compare
+    execution_must:
+      - Use grid-template-columns 3fr 2fr (or 2fr 3fr) — NEVER 1fr 1fr
+      - Big card has the headline / hero content
+      - Small cards stacked vertically on the secondary side
+      - Visually clear which side is the focal point — different bg color or border weight
+    fails_when: [equal_columns, missing_hero_emphasis, three_or_more_cards_each_side]
 
   editorial-split:
-    description: 60/40 or 70/30 left-right content split
+    description: 60/40 or 70/30 left-right content split (text on one side, visual or callout on other)
     best_for: [explanation_with_visual, text_plus_diagram, narrative_with_data]
     css_class: editorial-split
+    execution_must:
+      - One side text-heavy, the other side visual-heavy (chart, big number, accent shape, image)
+      - Asymmetric ratio — never 50:50
+      - Vertical centering on shorter side
 
   h-track:
-    description: Equal-width horizontal panels with dividers
+    description: Equal-width horizontal panels with dividers — for sequential or parallel content
     best_for: [timeline_phases, parallel_processes, before_after]
     css_class: h-track
     children: h-track-item
+    execution_must:
+      - 3-5 panels in one horizontal row
+      - 1px or 2px vertical divider between panels
+      - Each panel has step number + title + 1-2 lines
 
   dual-timeline:
-    description: Two columns with center connector line
+    description: Two parallel timeline columns connected by a CENTER VERTICAL LINE (the layout's signature)
     best_for: [milestones, parallel_tracks, plan_vs_actual]
     css_class: dual-timeline
+    execution_must:
+      - VISIBLE center vertical line connecting all entries — without it the layout is just two lists
+      - Timeline markers (dots, circles) on the line at each entry
+      - Left column entries angle-aligned right; right column angle-aligned left
+      - Each entry has timestamp + label + description
+    fails_when: [missing_center_line, no_markers, items_not_connected_visually]
 
   kpi-hero-row:
-    description: 3-4 large metric boxes in a prominent row
+    description: 3-4 large metric BOXES in a prominent row, each with a huge number
     best_for: [key_numbers, headline_stats, progress_indicators]
     css_class: kpi-hero-row
     children: kpi-hero
+    execution_must:
+      - Each metric box has a NUMBER (use visual_kit.typography_scale.number — clamp 3rem+)
+      - Below number: short label + optional small caption
+      - Use this layout ONLY when content has actual numeric values
 
   opp-ladder:
-    description: Numbered step rows with colored left border and hover effect
+    description: Numbered step rows with colored left border, stacking vertically
     best_for: [ordered_list, roadmap, ranked_items, opportunities]
     css_class: opp-ladder
     children: opp-step
+    execution_must:
+      - Each row has a 4-6px colored left border (signature element)
+      - Bold step number (01, 02) in accent color at row start
+      - Title + description text on the right of the number
+      - 3-5 steps stacked, NOT in columns
+      - Hover effect: translateX(4px) or borderColor change
+    fails_when: [missing_left_border, numbers_not_styled, items_in_grid_not_stack]
 
   risk-stack:
     description: 3-column gauge cards (severity | description | response)
     best_for: [risks, issues, challenges, constraints]
     css_class: risk-stack
     children: risk-card
+    execution_must:
+      - Each card has a severity gauge (color-coded badge: high/med/low)
+      - 3 columns of risk cards, equal width
+      - Severity color: red/amber/green or accent variants
 
   data-table:
-    description: Corporate navy-header table (use max once per deck)
+    description: Corporate navy-header table with alternating row backgrounds
     best_for: [structured_data, feature_matrix, comparison_table]
     css_class: data-table
     max_per_deck: 1
+    execution_must:
+      - Header row in navy/dark accent with white text, font-weight 600
+      - Body rows alternate transparent and subtle tint
+      - First column emphasized with semibold
 
   grid-3:
-    description: Basic 3-column equal cards
+    description: Basic 3-column equal cards (use sparingly — feels generic)
     best_for: [three_equal_items]
     css_class: grid-3
     max_per_deck: 1
+    execution_must:
+      - Exactly 3 cards (not 4, not 6)
+      - Each card has icon/visual element + title + description
+      - Use only when content really has 3 parallel items
+
+  grid-2:
+    description: Basic 2-column layout (fallback when no specialised layout fits)
+    best_for: [two_parallel_items, side_by_side]
+    css_class: grid-2
+    execution_must:
+      - 2 columns of equal width with a clear visual separator (gap or hairline)
+      - Each column has a title + description; do not leave a column empty
+      - Use accent color on the LEFT column's title to create visual asymmetry
+
+  hero:
+    description: Cover / title slide with hero treatment
+    best_for: [cover, opening, intro]
+    css_class: hero
+    execution_must:
+      - Use bg_motif_hero from preset.visual_kit (radial gradient or layered orbs)
+      - At least one accent_shape (gradient-orb) positioned in upper or lower corner
+      - Eyebrow tag above h1 (uppercase, letter-spacing 0.2em, accent color, ≤ 30 chars)
+      - Title with negative letter-spacing per visual_kit.letter_spacing_display
+      - Optional subtitle in text_dim color, smaller weight
+      - Optional caption row at bottom (date / location / version)
+      - DO NOT center title on screen — use left-aligned with padding-left offset
+
+  closing:
+    description: Final / thank-you slide
+    best_for: [closing, thank_you, q_and_a, call_to_action]
+    css_class: closing
+    execution_must:
+      - Minimal: one h1/h2 + at most 1 short subtitle line
+      - At most ONE accent shape (a single hairline-divider or single accent-bar)
+      - No bullet lists, no card grids
+      - Visually mirror the cover (same bg motif palette intensity)

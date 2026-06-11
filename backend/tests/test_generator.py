@@ -132,6 +132,43 @@ class TestExtractHtml:
         assert "Reasoning that never closes" not in result
         assert result.startswith("<section")
 
+    def test_fragment_css_and_js_injected_independently(self, generator):
+        """Regression: when a model copies the fragment CSS from a context
+        slide but DROPS the JS, the previous coupled check (both keyed on
+        '__ppt_fragments__') saw the leaked CSS and skipped both injections,
+        leaving fragments stuck at opacity:0 with no JS to reveal them.
+        Each must be injected independently of the other's presence."""
+        # Simulate a model that copied the OLD fragment style block from
+        # context but emitted no script.
+        text = (
+            '<section class="slide grid-2">'
+            '<style data-id="__ppt_fragments__">.fragment{opacity:0}</style>'
+            '<div class="card fragment">content</div>'
+            '</section>'
+        )
+        result = generator._post_process_slide(text, "electric-studio", layout_class="grid-2")
+        assert '<style data-id="__ppt_fragments__"' in result, \
+            "existing CSS should be left in place"
+        assert '<script data-id="__ppt_fragments__"' in result, \
+            "JS must still be injected even when CSS already exists"
+        assert "data-frag-active" in result, \
+            "JS should set the body marker so hide-by-default CSS only kicks in when JS runs"
+
+    def test_fragment_visible_when_js_missing(self, generator):
+        """Defense: when JS fails to run (CSP block, truncated stream, model
+        deleted it), the CSS must NOT leave fragments stuck invisible. The
+        injected style gates the hide rule on body[data-frag-active] which
+        only the JS sets — so missing JS = visible fragments."""
+        text = '<section class="slide grid-2"><h2>x</h2><div class="fragment">y</div></section>'
+        result = generator._post_process_slide(text, "electric-studio", layout_class="grid-2")
+        # Marker-conditioned hide must exist
+        compact = result.replace(" ", "").replace("\n", "")
+        assert "body[data-frag-active].fragment{opacity:0" in compact, \
+            "Hide rule must be gated by body[data-frag-active] for graceful degradation"
+        # JS must set the marker — without that the gate never closes.
+        assert 'document.body.setAttribute("data-frag-active"' in result, \
+            "JS must set the body marker"
+
     def test_collapses_malformed_double_style_open(self, generator):
         """Models occasionally emit <style<style> (a double-open of <style>)
         when they meant </style><style>. Browsers parse it as a malformed

@@ -234,6 +234,14 @@ class PPTAgent:
             overflow_y = render_check.get("overflow_y_px", 0) or 0
             overflow_x = render_check.get("overflow_x_px", 0) or 0
             leaked = render_check.get("leaked_text")
+            # Density and empty-box metrics are exposed by the gate but
+            # NOT used to fail the slide here — analysis on user-flagged
+            # samples showed they correlate poorly with perceived failure
+            # (good slides scored 0.07 density, bad slides scored 0.21).
+            # We keep them in the metrics for diagnostic logging only;
+            # the dominant signal remains overflow + leaked text.
+            density = render_check.get("content_density", 1.0)
+            empty_boxes = render_check.get("empty_content_boxes", 0)
             real_overflow = (
                 overflow_y > OVERFLOW_TOLERANCE_PX
                 or overflow_x > OVERFLOW_TOLERANCE_PX
@@ -254,7 +262,7 @@ class PPTAgent:
                 report.issues = list(report.issues) + msg_parts
                 logger.warning(
                     f"Slide {slide_index} attempt {attempt+1}: real-render overflow "
-                    f"y={overflow_y}px x={overflow_x}px leaked={'yes' if leaked else 'no'}"
+                    f"y={overflow_y}px x={overflow_x}px density={density:.2f} empty={empty_boxes} leaked={'yes' if leaked else 'no'}"
                 )
 
             if report.score >= QUALITY_THRESHOLD and report.passed:

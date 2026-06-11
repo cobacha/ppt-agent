@@ -353,6 +353,37 @@ class QualityGate:
                         """() => {
                             const sec = document.querySelector('section');
                             if (!sec) return null;
+                            // Compute content density: text-bearing element area / section area.
+                            // Pages with density < 0.05 are visually sparse — usually
+                            // means decorations dominate and bullet content is missing
+                            // or starved (the "looks half-finished" failure mode).
+                            const isText = (el) => {
+                                const own = Array.from(el.childNodes).find(n => n.nodeType === 3 && (n.nodeValue || '').trim().length > 2);
+                                return !!own && el.children.length < 5;
+                            };
+                            let textPx = 0;
+                            const allEls = sec.querySelectorAll('h1,h2,h3,h4,p,li,span,strong,em,b,div');
+                            for (const el of allEls) {
+                                if (!isText(el)) continue;
+                                const r = el.getBoundingClientRect();
+                                if (r.width > 5 && r.height > 5) textPx += r.width * r.height;
+                            }
+                            const secArea = Math.max(1, sec.clientWidth * sec.clientHeight);
+                            const density = textPx / secArea;
+
+                            // Empty-card detection: divs whose class hints at content
+                            // (card/item/panel/tile/step/stage) but contain no
+                            // meaningful text. These often appear when the model
+                            // dropped descriptive content for a layout slot.
+                            let emptyContentBoxes = 0;
+                            sec.querySelectorAll('div').forEach(d => {
+                                const cls = (d.className || '').toString();
+                                if (!/card|item|panel|tile|step|stage/i.test(cls)) return;
+                                if ((d.textContent || '').trim().length >= 4) return;
+                                const r = d.getBoundingClientRect();
+                                if (r.width > 80 && r.height > 50) emptyContentBoxes++;
+                            });
+
                             let leaked = '';
                             // 1) Body-level leak: anything outside <section>
                             for (const node of document.body.childNodes) {
@@ -387,6 +418,8 @@ class QualityGate:
                                 sh: sec.scrollHeight, ch: sec.clientHeight,
                                 sw: sec.scrollWidth,  cw: sec.clientWidth,
                                 leaked: leaked.slice(0, 250),
+                                density: density,
+                                emptyContentBoxes: emptyContentBoxes,
                             };
                         }"""
                     )
@@ -402,14 +435,23 @@ class QualityGate:
         ovy = max(0, metrics["sh"] - metrics["ch"] - TOL)
         ovx = max(0, metrics["sw"] - metrics["cw"] - TOL)
         leaked = metrics["leaked"].strip(" |") or None
+        density = float(metrics.get("density") or 0.0)
+        empty_boxes = int(metrics.get("emptyContentBoxes") or 0)
+        # density < 0.05 = "sparse" (text takes <5% of slide); empty_boxes > 0
+        # means decorative containers without any text content. Both signals
+        # correlate with "user perceives slide as incomplete".
+        sparse = density < 0.05
         return {
-            "ok": ovy == 0 and ovx == 0 and not leaked,
+            "ok": ovy == 0 and ovx == 0 and not leaked and not sparse and empty_boxes == 0,
             "section_height": metrics["sh"],
             "section_width": metrics["sw"],
             "viewport": [w, h],
             "overflow_y_px": ovy,
             "overflow_x_px": ovx,
             "leaked_text": leaked,
+            "content_density": round(density, 3),
+            "empty_content_boxes": empty_boxes,
+            "sparse": sparse,
         }
 
     async def render_check_overflow(

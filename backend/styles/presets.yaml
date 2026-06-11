@@ -14,10 +14,49 @@ bold-signal:
     card_bg: "#FF5722"
     text_primary: "#ffffff"
     accent: "#FF5722"
+    accent_warm: "#FF8A50"
+    text_dim: "rgba(255,255,255,0.6)"
+    border_subtle: "rgba(255,255,255,0.10)"
   signature:
     - Bold colored card as focal point
     - Large section numbers (01, 02, etc.)
     - Grid-based precise alignment
+  visual_kit:
+    typography_scale:
+      h1: "clamp(2.8rem, 7vw, 5.5rem)"
+      h2: "clamp(1.8rem, 4vw, 3rem)"
+      h3: "clamp(1.15rem, 2vw, 1.5rem)"
+      body: "clamp(0.95rem, 1.4vw, 1.2rem)"
+      caption: "clamp(0.7rem, 1.05vw, 0.85rem)"
+      number: "clamp(4rem, 9vw, 7rem)"
+      weight_display: 900
+      weight_body: 500
+      letter_spacing_display: "-0.04em"
+      line_height_display: "0.95"
+      line_height_body: "1.5"
+    bg_motif_hero: "background: linear-gradient(135deg,#1a1a1a 0%,#2d2d2d 50%,#1a1a1a 100%); position: relative;"
+    bg_motif_content: "background: #1a1a1a; position: relative;"
+    accent_shapes:
+      - name: orange-block
+        css: "background:#FF5722;color:#ffffff;font-weight:900;letter-spacing:-0.03em;"
+      - name: massive-number
+        css: "font-family:'Archivo Black',sans-serif;font-size:clamp(4rem,9vw,7rem);font-weight:900;line-height:0.9;letter-spacing:-0.06em;color:#FF5722;"
+      - name: thick-rule
+        css: "height:6px;width:clamp(40px,8vw,80px);background:#FF5722;"
+      - name: dot-grid
+        css: "position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,87,34,0.08) 1px,transparent 1px);background-size:32px 32px;pointer-events:none;"
+    shadow_stack:
+      card: "8px 8px 0 #FF5722"
+      panel: "0 30px 80px rgba(0,0,0,0.7)"
+    spacing_tokens:
+      page_padding: "clamp(2.5rem, 6vw, 4.5rem)"
+      block_gap: "clamp(1.5rem, 3vh, 2.5rem)"
+      inline_gap: "clamp(0.8rem, 1.5vw, 1.2rem)"
+    signature_recipes:
+      - "Massive section number (01, 02) using massive-number recipe — bold focal anchor"
+      - "Hard offset shadow on cards (8px 8px 0 accent) — graphic editorial feel"
+      - "One full-bleed accent-color block per slide containing a key word/number"
+      - "Strict geometric alignment to a 12-column grid — never centered, always intentional offset"
 
 electric-studio:
   name: 电子工坊
@@ -30,11 +69,50 @@ electric-studio:
     bg_primary: "#0a0a0a"
     bg_white: "#ffffff"
     accent: "#4361ee"
+    accent_violet: "#7c3aed"
     text_primary: "#ffffff"
+    text_dim: "rgba(255,255,255,0.62)"
+    border_subtle: "rgba(255,255,255,0.08)"
   signature:
     - Two-panel vertical split
     - Accent bar on panel edge
     - Minimal confident spacing
+  visual_kit:
+    typography_scale:
+      h1: "clamp(2.4rem, 5.5vw, 4.5rem)"
+      h2: "clamp(1.6rem, 3.4vw, 2.6rem)"
+      h3: "clamp(1.1rem, 1.9vw, 1.5rem)"
+      body: "clamp(0.9rem, 1.35vw, 1.15rem)"
+      caption: "clamp(0.7rem, 1.05vw, 0.85rem)"
+      number: "clamp(3rem, 7vw, 5.5rem)"
+      weight_display: 700
+      weight_body: 400
+      letter_spacing_display: "-0.025em"
+      line_height_display: "1.05"
+      line_height_body: "1.55"
+    bg_motif_hero: "background: radial-gradient(ellipse at 25% 18%, rgba(67,97,238,0.20) 0%, transparent 55%), radial-gradient(ellipse at 78% 82%, rgba(124,58,237,0.13) 0%, transparent 55%), #0a0a0a;"
+    bg_motif_content: "background: linear-gradient(180deg, #0a0a0a 0%, #0e0e16 100%); position: relative;"
+    accent_shapes:
+      - name: gradient-orb
+        css: "position:absolute;width:clamp(200px,32vw,420px);height:clamp(200px,32vw,420px);border-radius:50%;filter:blur(90px);background:radial-gradient(circle,#4361ee 0%,transparent 70%);opacity:0.32;pointer-events:none;"
+      - name: accent-bar
+        css: "width:clamp(48px,6vw,72px);height:3px;background:linear-gradient(90deg,#4361ee 0%,#7c3aed 100%);border-radius:2px;"
+      - name: hairline-divider
+        css: "height:1px;background:linear-gradient(90deg,transparent,rgba(67,97,238,0.5),transparent);"
+      - name: grid-overlay
+        css: "position:absolute;inset:0;background-image:linear-gradient(rgba(67,97,238,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(67,97,238,0.04) 1px,transparent 1px);background-size:64px 64px;pointer-events:none;"
+    shadow_stack:
+      card: "0 1px 2px rgba(0,0,0,0.4), 0 12px 32px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04)"
+      panel: "0 24px 60px rgba(0,0,0,0.55)"
+    spacing_tokens:
+      page_padding: "clamp(2.5rem, 6vw, 4.5rem)"
+      block_gap: "clamp(1.5rem, 3vh, 2.5rem)"
+      inline_gap: "clamp(0.8rem, 1.5vw, 1.2rem)"
+    signature_recipes:
+      - "Eyebrow above h1: uppercase small caps in accent color, letter-spacing 0.2em, font-size caption"
+      - "Numbered marker: large display-weight number (use number scale) with -0.05em tracking, accent color, low opacity 0.85"
+      - "Card border: 1px solid border_subtle + shadow_stack.card; on hover translateY(-2px) + accent border"
+      - "At least one gradient-orb decorative element on hero/content slides; never on closing"
 
 dark-botanical:
   name: 暗夜花园
@@ -79,15 +157,57 @@ corporate-navy:
     source: google
   colors:
     bg_primary: "#f8f9fc"
-    text_primary: "#1a1a2e"
+    bg_card: "#ffffff"
+    text_primary: "#0f172a"
+    text_secondary: "#475569"
+    text_muted: "#94a3b8"
     accent_blue: "#0052d9"
+    accent_blue_dark: "#003a9c"
     accent_green: "#059669"
     accent_purple: "#7c3aed"
+    border_subtle: "#e2e8f0"
   signature:
     - Light background with white cards
     - Navy tables with colored badges
     - Restrained hover effects
     - CSS counter page numbering
+  visual_kit:
+    typography_scale:
+      h1: "clamp(2.2rem, 5vw, 4rem)"
+      h2: "clamp(1.5rem, 3vw, 2.4rem)"
+      h3: "clamp(1.05rem, 1.8vw, 1.4rem)"
+      body: "clamp(0.9rem, 1.3vw, 1.1rem)"
+      caption: "clamp(0.7rem, 1vw, 0.85rem)"
+      number: "clamp(2.6rem, 6vw, 4.5rem)"
+      weight_display: 700
+      weight_body: 400
+      letter_spacing_display: "-0.02em"
+      line_height_display: "1.1"
+      line_height_body: "1.5"
+    bg_motif_hero: "background: linear-gradient(135deg, #f8f9fc 0%, #eef2f7 100%); position: relative;"
+    bg_motif_content: "background: #f8f9fc; position: relative;"
+    accent_shapes:
+      - name: navy-header-strip
+        css: "height:6px;background:linear-gradient(90deg,#0052d9 0%,#7c3aed 100%);"
+      - name: side-rule
+        css: "width:4px;background:#0052d9;border-radius:2px;"
+      - name: badge-blue
+        css: "display:inline-flex;align-items:center;padding:0.3em 0.85em;background:rgba(0,82,217,0.1);color:#0052d9;border:1px solid rgba(0,82,217,0.2);border-radius:999px;font-size:clamp(0.7rem,1vw,0.85rem);font-weight:600;letter-spacing:0.05em;text-transform:uppercase;"
+      - name: corner-mark
+        svg: '<svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="#0052d9" stroke-width="2" stroke-linecap="round"><path d="M4 4 L4 12 M4 4 L12 4"/></svg>'
+    shadow_stack:
+      card: "0 1px 3px rgba(15,23,42,0.06), 0 8px 24px rgba(15,23,42,0.06), inset 0 0 0 1px #e2e8f0"
+      panel: "0 24px 48px rgba(15,23,42,0.10)"
+    spacing_tokens:
+      page_padding: "clamp(2.5rem, 6vw, 4.5rem)"
+      block_gap: "clamp(1.5rem, 3vh, 2.5rem)"
+      inline_gap: "clamp(0.8rem, 1.5vw, 1.2rem)"
+    signature_recipes:
+      - "Eyebrow tag: badge-blue recipe with section number or category — McKinsey-style category marker"
+      - "Side rule on text blocks: 4px navy bar accenting key paragraphs / quotes"
+      - "Numbered KPI: number scale in accent_blue, body description in text_secondary below — restrained data emphasis"
+      - "Hairline 1px border + soft shadow on every card; never rely on color fills alone for separation"
+      - "Footer: thin top divider + small caption text with page number on right (CSS counter)"
 
 neon-cyber:
   name: 霓虹赛博
