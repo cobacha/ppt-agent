@@ -219,6 +219,26 @@ class PPTAgent:
             # Rule-based structural check
             report = self.quality_gate.check_single(html)
 
+            # Pre-render fast check: did the model actually write CSS for
+            # the classes it used, or did it emit class names with no
+            # styles to back them? An unstyled slide renders as raw flowing
+            # text (white bg, no layout) — looks "failed" to the user even
+            # though all bullets are present. Catching this statically
+            # avoids spinning up Playwright when the answer is obvious.
+            if not self.quality_gate.has_styling(html):
+                report.score = max(35.0, report.score - 35)
+                report.passed = False
+                msg = (
+                    "本页缺少 CSS 样式定义——只用了类名（class=\"...\"）但没有"
+                    "<style>规则或丰富的 inline style 来支撑。结果会退化为无样式纯文本。"
+                    "必须包含一个完整的 <style> 块定义本页所有 layout/card/typography 的视觉规则。"
+                )
+                report.issues = list(report.issues) + [msg]
+                logger.warning(
+                    f"Slide {slide_index} attempt {attempt+1}: missing styling — "
+                    f"class names without matching CSS rules"
+                )
+
             # Real-render overflow check — the canonical viewport-fit gate.
             # Static rules can confirm CSS *intends* to clip (overflow:hidden,
             # 100vh, clamp()), but they can't confirm content actually fits.

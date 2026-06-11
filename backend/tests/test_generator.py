@@ -132,6 +132,47 @@ class TestExtractHtml:
         assert "Reasoning that never closes" not in result
         assert result.startswith("<section")
 
+    def test_has_styling_detects_unstyled_slide(self, generator):
+        """Regression: model occasionally emits HTML with class names but
+        ZERO CSS rules to back them. Browser falls back to unstyled
+        rendering (white bg, full-width body text), which users perceive
+        as "the slide failed to generate". The has_styling static check
+        flags this so the loop can retry before accepting the candidate."""
+        from agent.validator import QualityGate
+        # Class names without any CSS — the failure case
+        unstyled = (
+            '<section class="slide cascade-grid">'
+            '<div class="eyebrow">核心痛点</div>'
+            '<h1>为什么需要 AI Agent？</h1>'
+            '<div class="cascade-card"><h3>知识截止</h3><p>训练数据有时限</p></div>'
+            '</section>'
+        )
+        assert QualityGate.has_styling(unstyled) is False, \
+            "must detect missing CSS"
+        # Same structure but with a <style> block — should pass
+        styled = (
+            '<section class="slide cascade-grid">'
+            '<style>.cascade-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:2rem;padding:3rem}'
+            '.eyebrow{font-size:0.85rem;text-transform:uppercase;color:#4361ee}'
+            '.cascade-card{background:rgba(255,255,255,0.03);padding:1.5rem;border-radius:8px}</style>'
+            '<div class="eyebrow">核心痛点</div>'
+            '<h1>为什么需要 AI Agent？</h1>'
+            '</section>'
+        )
+        assert QualityGate.has_styling(styled) is True
+        # Inline-style-heavy slide (model used inline only) — should pass
+        inline_only = (
+            '<section class="slide" style="padding:3rem;background:#0a0a0a;color:#fff">'
+            '<div style="font-size:0.85rem;text-transform:uppercase;letter-spacing:0.2em;color:#4361ee">eyebrow</div>'
+            '<h1 style="font-size:clamp(2rem,5vw,4rem);font-weight:700">title</h1>'
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:2rem;margin-top:2rem">'
+            '<div style="background:rgba(255,255,255,0.03);padding:1.5rem">card 1</div>'
+            '<div style="background:rgba(255,255,255,0.03);padding:1.5rem">card 2</div>'
+            '<div style="background:rgba(255,255,255,0.03);padding:1.5rem">card 3</div>'
+            '</div></section>'
+        )
+        assert QualityGate.has_styling(inline_only) is True
+
     def test_fragment_css_and_js_injected_independently(self, generator):
         """Regression: when a model copies the fragment CSS from a context
         slide but DROPS the JS, the previous coupled check (both keyed on

@@ -309,6 +309,36 @@ class QualityGate:
             warnings.append("No external font import — may use system fonts")
         return warnings
 
+    @staticmethod
+    def has_styling(html: str) -> bool:
+        """Cheap static check: does the HTML actually carry styling for its
+        classes, or did the model emit class-named elements with no CSS to
+        style them? The latter renders as unstyled fallback content (white
+        bg, full-width body text) — looks like the slide "failed to
+        generate" even though structure is intact.
+
+        Returns False when the slide is at risk of unstyled rendering. We
+        use this as a fast pre-render filter so the loop can retry without
+        spinning up a browser.
+        """
+        # Count user-defined <style> blocks (excluding our injected ones)
+        # and inline style="..." attributes (excluding the section's own).
+        user_styles = re.findall(
+            r"<style\b(?![^>]*data-id=\"__ppt_)[^>]*>",
+            html,
+            re.IGNORECASE,
+        )
+        # Inline styles on individual content elements — model can carry the
+        # whole design in inline styles without a <style> block.
+        inline_styles = re.findall(r'\bstyle="([^"]+)"', html)
+        # Strip out the section's own (always present from our post-process)
+        # and link/style-tag inline. We only count inline styles on content.
+        rich_inline = sum(
+            1 for s in inline_styles
+            if len(s) > 30 and not s.startswith("overflow")
+        )
+        return len(user_styles) >= 1 or rich_inline >= 4
+
     def render_check_overflow_sync(
         self,
         html: str,
